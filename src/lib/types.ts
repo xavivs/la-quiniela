@@ -54,6 +54,13 @@ export type RankingEntry = {
   total_points: number;
 };
 
+/** Used by leaderboard.ts (legacy matches/predictions). */
+export type LeaderboardEntry = {
+  user_id: string;
+  email: string;
+  total_points: number;
+};
+
 export type Season = {
   id: string;
   name: string;
