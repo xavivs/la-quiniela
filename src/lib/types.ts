@@ -28,6 +28,16 @@ export type QuinielaMatch = {
   result_away: "0" | "1" | "2" | "M" | null;
 };
 
+/** Used by admin MatchList (matches with date and real score). */
+export type Match = {
+  id: string;
+  home_team: string;
+  away_team: string;
+  date: string;
+  real_home_score?: number | null;
+  real_away_score?: number | null;
+};
+
 export type QuinielaPrediction = {
   id: string;
   user_id: string;
