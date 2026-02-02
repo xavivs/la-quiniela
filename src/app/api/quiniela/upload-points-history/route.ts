@@ -149,6 +149,7 @@ export async function POST(request: Request) {
       .limit(1)
       .single();
     const seasonName = activeSeason?.name ?? "2024-25";
+    const errors: string[] = [];
 
     // Crear jornadas históricas que falten
     const jornadasCreated: number[] = [];
@@ -174,7 +175,6 @@ export async function POST(request: Request) {
 
     // Procesar filas de jornadas
     const pointsToInsert: Array<{ user_id: string; jornada_id: string; points: number }> = [];
-    const errors: string[] = [];
     let rowsProcessed = 0;
 
     for (let rowIdx = jornadasStartRow; rowIdx < data.length; rowIdx++) {
