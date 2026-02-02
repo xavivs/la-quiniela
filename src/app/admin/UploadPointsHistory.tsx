@@ -46,7 +46,7 @@ export default function UploadPointsHistory() {
     <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50/50 p-4">
       <h3 className="mb-3 text-base font-medium text-slate-800">Subir puntos históricos (Excel)</h3>
       <p className="mb-3 text-sm text-slate-600">
-        Sube un archivo Excel con el formato: primera fila con nombres de usuarios (Xavi, Laura, Montse, etc.), segunda fila opcional con "TOTAL" (se ignora), filas siguientes con "Jornada N" y puntos por usuario.
+        Sube un archivo Excel con el formato: primera fila con nombres de usuarios (Xavi, Laura, Montse, etc.), segunda fila opcional con &quot;TOTAL&quot; (se ignora), filas siguientes con &quot;Jornada N&quot; y puntos por usuario.
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <label className="cursor-pointer rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">

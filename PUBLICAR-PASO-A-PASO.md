@@ -34,7 +34,16 @@ Para comprobar: abre una terminal y escribe `git --version`. Debe salir algo com
 
 ## Paso 2: Inicializar Git y hacer el primer commit (en tu PC)
 
-Abre una terminal **en la carpeta del proyecto** (`football-predictions`). En Cursor: Terminal → New Terminal (o `Ctrl+ñ`). Luego ejecuta **cada línea** (Enter después de cada una):
+Abre una terminal **en la carpeta del proyecto** (`football-predictions`). En Cursor: Terminal → New Terminal (o `Ctrl+ñ`). Luego ejecuta **cada línea** (Enter después de cada una). **No copies** las palabras `bash` ni las comillas invertidas ``` — solo el comando.
+
+Si es la primera vez que usas Git en este PC, configura nombre y email (usa el mismo email que en GitHub):
+
+```bash
+git config --global user.email "tu-email@ejemplo.com"
+git config --global user.name "Tu Nombre"
+```
+
+Después, en la carpeta del proyecto:
 
 ```bash
 cd c:\Users\xaviv\Documents\Cursor\football-predictions

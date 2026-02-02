@@ -93,7 +93,7 @@ export default function CreateSeasonForm({ onSeasonCreated }: Props = {}) {
                 <li>Los usuarios solo podrán votar en jornadas de la nueva temporada activa</li>
               </ul>
               <p className="text-sm font-medium text-amber-900">
-                ¿Estás seguro de que quieres crear la temporada "{seasonName}"?
+                ¿Estás seguro de que quieres crear la temporada &quot;{seasonName}&quot;?
               </p>
             </div>
           </div>
