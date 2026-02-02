@@ -152,7 +152,7 @@ export async function POST(request: Request) {
 
     // Crear jornadas históricas que falten
     const jornadasCreated: number[] = [];
-    for (const jornadaNumber of jornadasNeeded) {
+    for (const jornadaNumber of Array.from(jornadasNeeded)) {
       if (!jornadaNumberToId[jornadaNumber]) {
         const { data: newJornada, error: errJ } = await supabase
           .from("jornadas")
