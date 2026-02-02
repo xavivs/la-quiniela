@@ -15,15 +15,17 @@ async function fetchAndParseQuinielaWeb() {
   const html = await res.text();
 
   const results: string[] = [];
-  const oneXTwo = html.matchAll(
-    /(?:resultado|result|quiniela|celda|numero)[^>]*>[\s]*([1Xx2])[\s]*</gi
+  const oneXTwo = Array.from(
+    html.matchAll(
+      /(?:resultado|result|quiniela|celda|numero)[^>]*>[\s]*([1Xx2])[\s]*</gi
+    )
   );
   for (const m of oneXTwo) {
     const v = m[1].toUpperCase();
     if (v === "X" || v === "1" || v === "2") results.push(v);
   }
   if (results.length < 14) {
-    const alt = html.matchAll(/["']([1Xx2])["']/g);
+    const alt = Array.from(html.matchAll(/["']([1Xx2])["']/g));
     for (const m of alt) {
       const v = m[1].toUpperCase();
       if (v === "X" || v === "1" || v === "2") results.push(v);
