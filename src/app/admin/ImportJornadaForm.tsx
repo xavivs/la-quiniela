@@ -147,7 +147,7 @@ export default function ImportJornadaForm() {
             away_team: list[i]?.away_team ?? "",
           }))
         );
-        setMessage(data.message ?? (list.some((r) => r.home_team || r.away_team) ? "Equipos cargados." : "No se encontraron partidos en la web."));
+        setMessage(data.message ?? (list.some((r: MatchRow) => r.home_team || r.away_team) ? "Equipos cargados." : "No se encontraron partidos en la web."));
       } else {
         setMessage(data.message ?? data.error ?? "No se pudieron leer los equipos.");
       }
