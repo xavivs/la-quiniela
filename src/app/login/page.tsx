@@ -28,6 +28,30 @@ export default function LoginPage() {
     router.refresh();
   }
 
+  const isEmailNotConfirmed =
+    message?.type === "err" &&
+    (message.text.toLowerCase().includes("email not confirmed") ||
+      message.text.toLowerCase().includes("correo no confirmado"));
+
+  async function handleResendConfirmation() {
+    if (!email) return;
+    setLoading(true);
+    setMessage(null);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+    });
+    setLoading(false);
+    if (error) {
+      setMessage({ type: "err", text: error.message });
+      return;
+    }
+    setMessage({
+      type: "ok",
+      text: "Correo de confirmación reenviado. Revisa tu bandeja (y spam).",
+    });
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-8 max-md:p-4">
       <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-sm max-md:p-6">
@@ -60,6 +84,16 @@ export default function LoginPage() {
             >
               {message.text}
             </p>
+          )}
+          {isEmailNotConfirmed && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={loading}
+              className="text-sm font-medium text-slate-600 underline hover:text-slate-800 disabled:opacity-50"
+            >
+              Reenviar correo de confirmación
+            </button>
           )}
           <button
             type="submit"

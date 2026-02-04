@@ -9,12 +9,18 @@ export type ParsedPleno = { home: "0" | "1" | "2" | "M"; away: "0" | "1" | "2" |
 /** Normalize for OCR and web: dashes, spaces, tabs */
 function normalizeDashes(s: string): string {
   return s
-    .replace(/\u2013/g, " - ") // en dash
-    .replace(/\u2014/g, " - ") // em dash
-    .replace(/&ndash;|&#8211;|&#x2013;/gi, " - ")
-    .replace(/\s*[-–—]\s*/g, " - ") // hyphen, en-dash, em-dash
-    .replace(/\s+/g, " ")
+    .replace(/\u2013/g, "-") // en dash to hyphen
+    .replace(/\u2014/g, "-") // em dash to hyphen
+    .replace(/&ndash;|&#8211;|&#x2013;/gi, "-")
+    // Normalize all dashes to " - " (with spaces): handles "RAYO-OSASUNA", "RAYO -OSASUNA", "RAYO- OSASUNA", "RAYO - OSASUNA"
+    // This regex matches any dash (hyphen, en-dash, em-dash) with optional spaces around it
+    .replace(/\s*[-–—]\s*/g, " - ")
+    // Handle dots before dashes: "RACINGS.-LASPALMAS" -> "RACINGS - LASPALMAS"
+    .replace(/([A-Za-zÀ-ÿ0-9])\.\s*-\s*([A-Za-zÀ-ÿ0-9])/g, "$1 - $2")
+    // Normalize tabs to spaces
     .replace(/\t/g, " ")
+    // Normalize multiple spaces to single space (but preserve line structure)
+    .replace(/[ \t]+/g, " ")
     .trim();
 }
 
@@ -36,96 +42,521 @@ function ocrCleanWord(w: string): string {
 function isHeaderNoise(s: string): boolean {
   const t = s.toUpperCase().trim();
   if (t.length < 2) return true;
+  
+  // Reject strings that are mostly dots or have many consecutive dots (e.g., "e.e.e", "..........")
+  // But allow valid team names with a single dot like R.OVIEDO, ATH.CLUB, R.SOCIEDAD
+  if (t.match(/^[.\s]+$/)) return true; // Only dots/spaces
+  const dotMatches = t.match(/\./g);
+  if (dotMatches && dotMatches.length >= 3) return true; // 3+ dots total
+  if (t.match(/\.{2,}/)) return true; // 2+ consecutive dots
+  
+  // Reject patterns like "E.E", "E.E.E", "E.NNNNN" (OCR noise from dots)
+  if (/^[A-Z]\.[A-Z](\.[A-Z])*$/i.test(t) && t.length < 10) return true;
+  if (/^[A-Z]\.[A-Z]{3,}$/i.test(t) && t.length < 10) return true;
+  
   const strongNoise = ["PRONÓSTICO", "QUINIELA", "JORNADA", "DIA/HORA", "DIA HORA", "1X2", "VIERNES", "SABADO", "DOMINGO", "LUNES", "BOTE", "CIERRE", "PART."];
   if (strongNoise.some((n) => t.includes(n))) return true;
   if (/\d{1,2}:\d{2}\s*(VIE|SAB|DOM|LUN)/i.test(t) || /^\d\s*[Xx]\s*\d$/i.test(t)) return true;
   if (t === "PART" || t === "1X2") return true;
-  const shortNoise = ["MEX", "BOM", "TPXI", "DMETIX", "SABE", "DMPOITI", "MO OF"];
+  const shortNoise = ["MEX", "BOM", "TPXI", "DMETIX", "SABE", "DMPOITI", "MO OF", "EEE", "E.NNNNN"];
   if (t.length < 10 && shortNoise.some((n) => t.includes(n))) return true;
   return false;
 }
 
-/** Quita prefijos OCR (bóm, MeNITIXIZ, AB , etc.) y corrige nombres habituales (ROVIEDO→OVIEDO, ESPANVOL→ESPANYOL). */
+/**
+ * Prefijos OCR que son columna DIA/HORA o 1X2 y se cuelan en el nombre del equipo local.
+ * Se eliminan repetidamente hasta que solo quede el nombre del equipo.
+ * Incluye todos los patrones de ruido encontrados en diferentes jornadas.
+ */
+const OCR_JUNK_PREFIXES =
+  /^\s*(v\s+|Mex\s*2\s*|bóm|bom|boM|MeNITIXIZ|MENITIXIZ|AB\s+|TPXI2I\s+|TPXI2\s+|TPXI\s+|TPX12\s+|DMETIXIZ\s+|DMETIX\s+|DMPTIXIZ\s+|DMPTIX\s+|DOMITIXI2\s+|DMBTIXIZ\s+|DMT\s+|PTIXE2\s+|boMPTIXE2\s+|SABE\s*T?X?\s*\d?\s*\|?\s*\|?\s*|Sap\s+|Sah\s+|Sas\s+|SAB\s+|DOM\s+|LUN\s+|TUN\s+|tn\s+|Som\s+|po\s+|ap\s+|X2\s+|X\s+2\s+|xl2\s+|xI2\s+|T\|X\s*\d?\s*|TX\s*\d?\s*|1\s*\|?\s*X\s*\|?\s*2\s*|2\s*\|?\s*X\s*\|?\s*\d?\s*|op\s*1\s*\|?\s*2\s*\/?M\s*\|?|NO\s*1\/2\/M\s*\|?|UNEIIIXI2\s+|5OMPOL1\s*\[?\d?\)?M\s*|5MPOlN1\s*\|?\d?M\s*)\s*/gi;
+
+/** Quita prefijos OCR (bóm, DIA/HORA, 1X2, etc.) y corrige nombres habituales. */
 function cleanOcrTeamName(s: string): string {
   let t = s.trim();
-  const junkPrefix = /^(\d\s*)?(Mex\s*2\s*|bóm|bom|MeNITIXIZ|MENITIXIZ|AB\s+|TPXI2I\s+|TPXI2\s+|TPXI\s+|TPX12\s+|DMETIXIZ\s+|DMETIX\s+|SABE\s+TX\s*\d?\s*)\s*/i;
-  t = t.replace(junkPrefix, "");
+  let prev = "";
+  while (prev !== t && t.length > 0) {
+    prev = t;
+    t = t.replace(OCR_JUNK_PREFIXES, "").trim();
+  }
   t = t.replace(/\s+$/g, "").replace(/^\s+/g, "").replace(/\s+/g, " ");
   t = t.replace(/^ROVIEDO$/i, "OVIEDO").replace(/^ESPANVOL$/i, "ESPANYOL").replace(/^ESPANOL$/i, "ESPANYOL");
   return t.trim();
 }
 
-/** From OCR blob: take only the team name (stop at comma, dots, or " 1 X 2 " style) */
+/**
+ * From OCR blob: take only the team name.
+ * Stop at: trailing comma, multiple dots (3+), match number patterns, or OCR noise.
+ * Does NOT strip a single dot inside name (e.g. R.OVIEDO stays).
+ * Simplified for line-based parsing where we already cut at "..." markers.
+ */
 function trimToTeamName(s: string): string {
   let t = s.trim();
-  t = t.replace(/\s*[,.]\s*.*$/, "").replace(/\s*\.{2,}.*$/, "").replace(/\s*\d\s*[Xx]\s*\d.*$/i, "").replace(/\s+\d{1,2}\s+\d{2,4}.*$/, "");
-  return ocrCleanWord(t).replace(/\s+/g, " ").trim();
+  // Normalize whitespace
+  t = t.replace(/\s+/g, " ");
+  
+  // Stop at trailing comma (team names don't have commas)
+  t = t.replace(/,.*$/, "");
+  
+  // Stop at multiple consecutive dots (2+) - these are separators (be more aggressive)
+  t = t.replace(/\s*\.{2,}.*$/, "");
+  
+  // Stop at patterns like "e.e.e" or "e.nnnnn" (OCR noise)
+  t = t.replace(/[a-z]\.[a-z]{1,}\.[a-z]{1,}.*$/i, ""); // e.e.e pattern
+  t = t.replace(/[a-z]\.[a-z]{3,}.*$/i, ""); // e.nnnnn pattern
+  
+  // Stop at match number patterns: " 12 1", " 3 56909", " 3 SAB", " 15 5OMPOL1[2)M"
+  t = t.replace(/\s+\d{1,2}\s+(\d{2,4}|[A-Za-z]{2,10}|[A-Z0-9\[\]\(\)\|]+).*$/i, "");
+  
+  // Stop at trailing match number only: " 15"
+  t = t.replace(/\s+\d{1,2}\s*$/, "");
+  
+  // Stop at "1 X 2" patterns
+  t = t.replace(/\s*\d\s*[Xx\/]\s*\d.*$/i, "");
+  
+  // Stop at "|2|", "|1|2|M|" patterns
+  t = t.replace(/\s*\|\s*[Xx12M\d\s\/]+\s*\|?\s*$/i, "");
+  
+  // Stop at OCR noise patterns: "op1|2|M|", "NO 1/2/M|", "5OMPOL1[2)M", "5MPOlN1|2M", etc.
+  t = t.replace(/\s+op\s*\d\s*\|?\s*\d\s*\/?M\s*\|?\s*$/i, "");
+  t = t.replace(/\s+NO\s+\d\s*\/\s*\d\s*\/\s*M\s*\|?\s*$/i, "");
+  // Stop at patterns like "5OMPOL1[2)M" or "5MPOlN1|2M" (OCR noise after match number)
+  t = t.replace(/\s+\d+[A-Z0-9\[\]\(\)\|]+.*$/i, "");
+  
+  // Remove trailing dots (but preserve single dot in names like R.OVIEDO)
+  t = t.replace(/\.+$/, "");
+  
+  // Final cleanup: reject noise patterns like "e.e" or "e.e.e"
+  if (/^[a-z]\.[a-z](\.[a-z])*$/i.test(t) && t.length < 10) {
+    return "";
+  }
+  
+  return ocrCleanWord(t).trim();
 }
 
 /**
- * Extract up to 15 "HOME - AWAY" pairs from text (e.g. from quiniela results page or OCR boleto).
- * Skips header (DIA/HORA, PRONÓSTICO QUINIELA, 1X2, etc.) and splits each match correctly.
+ * Extract up to 15 "HOME - AWAY" pairs from text using line-based parsing.
+ * Strategy: Split by lines, find "JORNADA" marker, then process each line in order.
+ * Format: "Local - Visitante...." + noise + newline for matches 1-14
+ * Format: "Local" + noise + newline + "Visitante..." + noise for match 15 (Pleno al 15)
+ * 
+ * Structure:
+ * COSAS (header lines)
+ * JORNADA X COSAS
+ * LOCAL-VISITANTE...COSAS (or LOCAL - VISITANTE...COSAS)
+ * ...
+ * LOCAL COSAS (match 15, line 1)
+ * VISITANTE,... COSAS (match 15, line 2)
  */
 export function parseTeamNamesFromText(text: string): ParsedMatch[] {
-  const normalized = normalizeDashes(text);
   const matches: ParsedMatch[] = [];
-
-  // Try line-by-line first (one match per line)
-  const lines = normalized.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 2);
-
-  for (const line of lines) {
-    if (matches.length >= 15) break;
-    const dashIdx = line.indexOf(" - ");
-    if (dashIdx === -1) continue;
-    let left = line.slice(0, dashIdx).trim();
-    let right = line.slice(dashIdx + 3).trim();
-    left = stripMatchPrefix(left);
-    left = cleanOcrTeamName(ocrCleanWord(left).replace(/\s+/g, " "));
-    right = cleanOcrTeamName(trimToTeamName(right));
-    if (left.length < 2 || right.length < 2) continue;
-    if (/^\d+$/.test(left) || /^\d+$/.test(right)) continue;
-    if (isHeaderNoise(left) || isHeaderNoise(right)) continue;
-    matches.push({ home_team: left, away_team: right });
+  // Split into lines
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  
+  // Find where matches start (after "JORNADA X" line)
+  let startIdx = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/JORNADA\s+\d+/i.test(lines[i])) {
+      startIdx = i + 1;
+      break;
+    }
   }
-
-  if (matches.length >= 14) {
-    tryAddPleno15(normalized, matches);
-    return applyCleanOcrToMatches(matches);
+  // If we didn't find JORNADA, try to skip obvious header lines
+  if (startIdx === 0) {
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      if (/PRONÓSTICO|QUINIELA|DIA\/HORA|1X2|PART\./i.test(lines[i])) {
+        startIdx = i + 1;
+      }
+    }
   }
-
-  // OCR blob: find every "TEAM - TEAM" with regex; team ends at comma, dots, or " 1 X 2 "
-  // so we don't merge several matches into one (e.g. "GETAFE - RSOCIEDAD" only, not "DIA/HORA - 1X2")
-  const blobRegex = /([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s]{1,40}?)\s+-\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s]{1,40}?)(?=[.,]|\s*\.{2,}|\s*\d\s*[Xx]\s*\d|\s+\d{1,2}\s+\d{2,4}|\s+\d{1,2}\s+[A-ZÀ-ÿ]|$)/gi;
-  let m: RegExpExecArray | null;
-  const seen = new Set<string>();
-  while ((m = blobRegex.exec(normalized)) !== null && matches.length < 15) {
-    let home = cleanOcrTeamName(trimToTeamName(stripMatchPrefix(m[1].trim())).replace(/\s+/g, " "));
-    let away = cleanOcrTeamName(trimToTeamName(m[2].trim()).replace(/\s+/g, " "));
-    if (home.length < 2 || away.length < 2) continue;
-    if (/^\d+$/.test(home) || /^\d+$/.test(away)) continue;
-    if (isHeaderNoise(home) || isHeaderNoise(away)) continue;
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push({ home_team: home, away_team: away });
-  }
-
-  if (matches.length > 0) {
-    tryAddPleno15(normalized, matches);
-    return applyCleanOcrToMatches(matches);
-  }
-
-  // Fallback: split by " - " and take alternating pairs, but skip header and trim away to one team
-  const parts = normalized.split(" - ").map((p) => p.trim()).filter((p) => p.length > 1);
-  if (parts.length >= 30) {
-    for (let i = 0; i < 15 && 2 * i + 1 < parts.length; i++) {
-      let home = trimToTeamName(stripMatchPrefix(parts[2 * i] ?? ""));
-      let away = trimToTeamName(parts[2 * i + 1] ?? "");
-      home = ocrCleanWord(home).replace(/\s+/g, " ");
-      away = away.replace(/\s+/g, " ");
+  
+  // Process lines in order from startIdx
+  // Continue until we have 15 matches, but allow checking extra lines for pleno al 15
+  for (let i = startIdx; i < lines.length; i++) {
+    // If we already have 15 matches and we've processed enough lines, stop
+    if (matches.length >= 15 && i > startIdx + 16) {
+      break;
+    }
+    const line = lines[i];
+    
+    // Skip header lines (COSAS) - but be less aggressive
+    if (/PRONÓSTICO|QUINIELA|DIA\/HORA|1X2|PART\./i.test(line)) {
+      continue;
+    }
+    // Only skip if entire line is header noise (not just contains it)
+    if (isHeaderNoise(line) && line.length < 20) {
+      continue;
+    }
+    
+    // Pattern 1: Line contains dash between team names (matches 1-14)
+    // Also handle cases without dash: "CELTA RAYO" (two capital words separated by space)
+    let dashIdx = -1;
+    let dashLen = 0;
+    let hasDash = false;
+    
+    const dashPatterns = [
+      { pattern: " - ", len: 3 },
+      { pattern: "-", len: 1 },
+      { pattern: "–", len: 1 },
+      { pattern: "—", len: 1 },
+    ];
+    
+    for (const { pattern, len } of dashPatterns) {
+      const idx = line.indexOf(pattern);
+      if (idx !== -1 && idx > 0 && idx < line.length - len) {
+        dashIdx = idx;
+        dashLen = len;
+        hasDash = true;
+        break;
+      }
+    }
+    
+    // Fallback: if no dash found, try to find two capital words separated by space
+    // Pattern: "CELTA RAYO" or "CELTA RAYO," or "CELTA RAYO, ....e.nnnnn"
+    let home = "";
+    let away = "";
+    let foundMatch = false;
+    
+    if (!hasDash) {
+      // Match two teams: first starts with capital, second starts with capital
+      // Stop at comma, dots, or numbers
+      const twoTeamsMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+)\s+([A-Z][A-Za-zÀ-ÿ0-9.]+)/);
+      if (twoTeamsMatch && twoTeamsMatch.index === 0) {
+        // Found two teams without dash - extract directly
+        let extractedHome = twoTeamsMatch[1].trim();
+        let extractedAway = twoTeamsMatch[2].trim();
+        
+        // Remove leading match number if present
+        extractedHome = stripMatchPrefix(extractedHome);
+        
+        // Clean away team - stop at comma, dots, or numbers
+        if (extractedAway.includes(",")) {
+          extractedAway = extractedAway.split(",")[0].trim();
+        }
+        const awayDotsMatch = extractedAway.match(/^(.+?)(?=\s*\.{2,}|$)/);
+        if (awayDotsMatch) {
+          extractedAway = awayDotsMatch[1].trim();
+        }
+        const awayNumMatch = extractedAway.match(/^(.+?)(?=\s+\d|$)/);
+        if (awayNumMatch) {
+          extractedAway = awayNumMatch[1].trim();
+        }
+        
+        home = extractedHome;
+        away = extractedAway;
+        foundMatch = true;
+      }
+    }
+    
+    if (hasDash && dashIdx !== -1 && !foundMatch) {
+      // Extract text before and after dash
+      let beforeDash = line.substring(0, dashIdx).trim();
+      let afterDash = line.substring(dashIdx + dashLen).trim();
+      
+      // Remove leading match number if present
+      beforeDash = stripMatchPrefix(beforeDash);
+      
+      // Extract team names - take everything up to dots (3+), comma, or numbers
+      // Home team: everything before dash (already extracted)
+      home = beforeDash;
+      // Stop home at numbers if present
+      const homeNumMatch = home.match(/^(.+?)(?=\s+\d+\s|$)/);
+      if (homeNumMatch) {
+        home = homeNumMatch[1].trim();
+      }
+      
+      // Away team: everything after dash until dots (3+), comma, or numbers
+      away = afterDash;
+      // Stop at dots (3+) - be more aggressive
+      const dotsMatch = away.match(/^(.+?)(?=\s*\.{2,}|$)/);
+      if (dotsMatch) {
+        away = dotsMatch[1].trim();
+      }
+      // Stop at comma
+      if (away.includes(",")) {
+        away = away.split(",")[0].trim();
+      }
+      // Stop at numbers (match number pattern) - be more aggressive
+      const numMatch = away.match(/^(.+?)(?=\s+\d{1,2}\s+\d|\s+\d{1,2}\s*$|\s+\d{2,}|$)/);
+      if (numMatch) {
+        away = numMatch[1].trim();
+      }
+      // Also stop at patterns like "15 5OMPOL1[2)M" or "15 5MPOlN1|2M"
+      const plenoNoiseMatch = away.match(/^(.+?)(?=\s+\d+\s+[A-Z0-9\[\]\(\)\|]+|$)/);
+      if (plenoNoiseMatch) {
+        away = plenoNoiseMatch[1].trim();
+      }
+    }
+    
+    // Apply cleaning to both cases (with dash or without dash)
+    if ((hasDash && dashIdx !== -1) || foundMatch) {
+      // Clean team names - minimal cleaning
+      home = home.replace(/\s+/g, " ").trim();
+      away = away.replace(/\s+/g, " ").trim();
+      
+      // Remove trailing dots, commas, and numbers - be more aggressive
+      home = home.replace(/[.,]+$/, "").trim();
+      away = away.replace(/[.,]+$/, "").trim();
+      home = home.replace(/\s+\d+.*$/, "").trim(); // Remove numbers and everything after
+      away = away.replace(/\s+\d+.*$/, "").trim(); // Remove numbers and everything after
+      // Remove patterns like "15 5OMPOL1[2)M" or "15 5MPOlN1|2M"
+      away = away.replace(/\s+\d+\s+[A-Z0-9\[\]\(\)\|]+.*$/, "").trim();
+      // Remove trailing dots (2+)
+      away = away.replace(/\.{2,}.*$/, "").trim();
+      
+      // Remove leading OCR noise prefixes
       home = cleanOcrTeamName(home);
       away = cleanOcrTeamName(away);
-      if (home.length >= 2 && away.length >= 2 && !/^\d+$/.test(home) && !/^\d+$/.test(away) && !isHeaderNoise(home) && !isHeaderNoise(away)) {
+      
+      // Basic OCR word cleaning
+      home = ocrCleanWord(home);
+      away = ocrCleanWord(away);
+      
+      // Final trim
+      home = home.trim();
+      away = away.trim();
+      
+      // Basic validation - be very lenient
+      if (home.length >= 2 && away.length >= 2 && 
+          !/^\d+$/.test(home) && !/^\d+$/.test(away) &&
+          home.length <= 50 && away.length <= 50) {
+        // Only reject if clearly header noise (very short and matches noise patterns)
+        const homeIsNoise = home.length < 4 && isHeaderNoise(home);
+        const awayIsNoise = away.length < 4 && isHeaderNoise(away);
+        
+        if (!homeIsNoise && !awayIsNoise) {
+          matches.push({ home_team: home, away_team: away });
+          continue;
+        }
+      }
+    }
+    
+    // Pattern 2: Pleno al 15 - current line is LOCAL (no dash), next line is VISITANTE
+    // Try when we have 13 or 14 matches (in case one was missed)
+    // Also try when we're near the end of the lines (last 3 lines)
+    const isNearEnd = i >= lines.length - 3;
+    if ((matches.length === 13 || matches.length === 14 || isNearEnd) && i + 1 < lines.length) {
+      const nextLine = lines[i + 1]?.trim() || "";
+      
+      // Current line should be a team name without dash (or with dash only if it's a known pleno pattern)
+      // Next line should be a team name without dash at start
+      // Be more lenient: allow checking even if current line has some patterns
+      const currentHasDash = line.indexOf("-") !== -1 || line.indexOf("–") !== -1 || line.indexOf("—") !== -1;
+      const nextHasDash = nextLine.indexOf(" - ") !== -1 || nextLine.indexOf("-") !== -1;
+      
+      // If current line doesn't have dash, or if we're at the end and it looks like pleno pattern
+      if (!currentHasDash && !nextHasDash) {
+        // Extract home team from current line (stop at OCR noise like "op1|2|M|", "op1/2/M|")
+        // Must capture full name including dots (e.g., "ATH.CLUB", "R.SOCIEDAD")
+        // Pattern: "ATH.CLUB op1/2/M|" or "R.SOCIEDAD op1|2|M|" or "GIRONA op1|2/M|"
+        // Match: starts with capital, then letters/numbers/dots, stop at "op" or end
+        // Use a more explicit pattern that handles dots correctly
+        let currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*?)(?=\s+op|\s*$)/i);
+        // If no match with "op", try capturing everything up to space or end
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*)/i);
+        }
+        // Fallback: simple pattern that definitely captures names with dots
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+?)(?=\s+op|\s*$)/);
+        }
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+)/);
+        }
+        // Extract away team from next line - capture name before comma, dots, or numbers
+        // Pattern: "GETAFE,..........neen..15 NO 1/2/M|" or "RSOCIEDAD......................15 5OMPOL1[2)M" or "BARCELONA......................15 5MPOlN1|2M"
+        // First try to get the name before comma or dots (2+)
+        let nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*?)(?=[,\s]*\.{2,}|\s+\d|$)/i);
+        // If no match, try without lookahead (just capture the name)
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*)/i);
+        }
+        // Fallback: simple pattern
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+?)(?=[,\s]*\.{2,}|\s+\d|$)/);
+        }
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+)/);
+        }
+        
+        if (currentMatch && nextMatch) {
+          let home = currentMatch[1].trim();
+          let away = nextMatch[1].trim();
+          
+          // Apply full cleaning pipeline to both teams
+          // For home team, be careful not to trim too aggressively (preserve dots in names like ATH.CLUB, R.SOCIEDAD)
+          home = stripMatchPrefix(home);
+          // Don't use trimToTeamName for home team if it has a dot (could be ATH.CLUB, R.SOCIEDAD, etc.)
+          // Just remove OCR noise patterns manually, but preserve the full name
+          if (!home.includes(".")) {
+            home = trimToTeamName(home);
+          } else {
+            // For names with dots, remove OCR noise patterns but preserve the name
+            // Remove patterns like "op1|2|M|", "op1/2/M|", etc.
+            home = home.replace(/\s+op\s*\d\s*\|?\s*\d\s*\/?M\s*\|?\s*$/i, "").trim();
+            // Remove any trailing spaces or noise
+            home = home.replace(/\s+$/, "").trim();
+          }
+          home = cleanOcrTeamName(home);
+          home = ocrCleanWord(home);
+          
+          // For away team, first remove comma if present, then use trimToTeamName
+          if (away.includes(",")) {
+            away = away.split(",")[0].trim();
+          }
+          // Use trimToTeamName which handles all the noise patterns
+          away = trimToTeamName(away);
+          away = cleanOcrTeamName(away);
+          away = ocrCleanWord(away);
+          
+          // Additional aggressive cleanup for away team (pleno al 15 often has more noise)
+          // Remove patterns like "......................15 5OMPOL1[2)M" or "..........neen..15 NO 1/2/M|"
+          away = away.replace(/\.{2,}.*$/, "").trim();
+          away = away.replace(/\s+\d+\s+[A-Z0-9\[\]\(\)\|]+.*$/, "").trim();
+          away = away.replace(/\s+\d+.*$/, "").trim();
+          away = away.replace(/[.,]+$/, "").trim();
+          
+          if (home.length >= 2 && away.length >= 2 && 
+              !/^\d+$/.test(home) && !/^\d+$/.test(away) &&
+              !isHeaderNoise(home) && !isHeaderNoise(away)) {
+            matches.push({ home_team: home, away_team: away });
+            i++; // Skip next line
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  // If we still don't have 15 matches, try to find pleno al 15 in the last few lines
+  if (matches.length < 15 && lines.length >= 2) {
+    // Look at the last 5 lines for pleno al 15 pattern (more aggressive)
+    for (let i = Math.max(startIdx, lines.length - 5); i < lines.length - 1; i++) {
+      const line = lines[i]?.trim() || "";
+      const nextLine = lines[i + 1]?.trim() || "";
+      
+      // Check if current line looks like a team name without dash
+      // and next line looks like another team name
+      if (line.length > 2 && nextLine.length > 2 &&
+          line.indexOf("-") === -1 && line.indexOf("–") === -1 && line.indexOf("—") === -1 &&
+          nextLine.indexOf(" - ") === -1 && nextLine.indexOf("-") === -1) {
+        
+        // Extract home team from current line - must capture full name including dots
+        // Pattern: "ATH.CLUB op1/2/M|" or "R.SOCIEDAD op1|2|M|" or "GIRONA op1|2/M|"
+        let currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*?)(?=\s+op|\s*$)/i);
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*)/i);
+        }
+        // Fallback: simple pattern that definitely captures names with dots
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+?)(?=\s+op|\s*$)/);
+        }
+        if (!currentMatch) {
+          currentMatch = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+)/);
+        }
+        // Extract away team from next line - capture name before comma, dots, or numbers
+        // Pattern: "GETAFE,..........neen..15" or "RSOCIEDAD......................15 5OMPOL1[2)M" or "BARCELONA......................15 5MPOlN1|2M"
+        let nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*?)(?=[,\s]*\.{2,}|\s+\d|$)/i);
+        // If no match, try without lookahead (just capture the name)
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9]+(?:\.[A-Za-zÀ-ÿ0-9]+)*)/i);
+        }
+        // Fallback: simple pattern
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+?)(?=[,\s]*\.{2,}|\s+\d|$)/);
+        }
+        if (!nextMatch) {
+          nextMatch = nextLine.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]+)/);
+        }
+        
+        if (currentMatch && nextMatch) {
+          let home = currentMatch[1].trim();
+          let away = nextMatch[1].trim();
+          
+          // Apply full cleaning pipeline
+          // For home team, be careful not to trim too aggressively (preserve dots in names)
+          home = stripMatchPrefix(home);
+          // Don't use trimToTeamName for home team if it has a dot (could be ATH.CLUB, R.SOCIEDAD, etc.)
+          if (!home.includes(".")) {
+            home = trimToTeamName(home);
+          } else {
+            // For names with dots, just remove OCR noise patterns
+            home = home.replace(/\s+op\s*\d\s*\|?\s*\d\s*\/?M\s*\|?\s*$/i, "").trim();
+          }
+          home = cleanOcrTeamName(home);
+          home = ocrCleanWord(home);
+          
+          // For away team, first remove comma if present, then use trimToTeamName
+          if (away.includes(",")) {
+            away = away.split(",")[0].trim();
+          }
+          away = trimToTeamName(away);
+          away = cleanOcrTeamName(away);
+          away = ocrCleanWord(away);
+          
+          // Additional aggressive cleanup for away team
+          away = away.replace(/\.{2,}.*$/, "").trim();
+          away = away.replace(/\s+\d+\s+[A-Z0-9\[\]\(\)\|]+.*$/, "").trim();
+          away = away.replace(/\s+\d+.*$/, "").trim();
+          away = away.replace(/[.,]+$/, "").trim();
+          
+          // Check if this looks like a valid team pair
+          if (home.length >= 2 && away.length >= 2 && 
+              !/^\d+$/.test(home) && !/^\d+$/.test(away) &&
+              !isHeaderNoise(home) && !isHeaderNoise(away)) {
+            // Check if we already have this match
+            const key = `${home}|${away}`;
+            const alreadyExists = matches.some(m => 
+              `${m.home_team}|${m.away_team}` === key
+            );
+            
+            if (!alreadyExists) {
+              matches.push({ home_team: home, away_team: away });
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return applyCleanOcrToMatches(matches);
+}
+
+/** Si faltan partidos (especialmente 13, 14, 15), intenta añadirlos desde el final del texto. */
+function tryAddPleno15(normalized: string, matches: ParsedMatch[], seen: Set<string>): void {
+  if (matches.length >= 15) return;
+  
+  const tail = normalized.slice(-400); // Más texto para detectar partidos 13, 14, 15
+  // Update seen set with current matches
+  for (const m of matches) {
+    seen.add(`${m.home_team}|${m.away_team}`);
+  }
+  
+  // Buscar partidos 13, 14, 15 con números explícitos: "13 RZARAGOZA - CASTELLÓN"
+  const numberedMatches = tail.matchAll(/(?:^|\s)(?:1[3-5]|P-15)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.\s]{2,25}?)\s+-\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.\s]{2,25}?)(?=[.,\s]|\s*\d|$)/gi);
+  for (const m of numberedMatches) {
+    if (matches.length >= 15) break;
+    let home = cleanOcrTeamName(trimToTeamName(stripMatchPrefix(m[1].trim())).replace(/\s+/g, " "));
+    let away = cleanOcrTeamName(trimToTeamName(m[2].trim()).replace(/\s+/g, " "));
+    if (home.length >= 2 && away.length >= 2 && !isHeaderNoise(home) && !isHeaderNoise(away)) {
+      const key = `${home}|${away}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        matches.push({ home_team: home, away_team: away });
+      }
+    }
+  }
+  
+  // Si aún faltan partidos, buscar en el final sin números: "RZARAGOZA - CASTELLÓN", "DEPORTIVO-RACINGS", "GIRONA - GETAFE"
+  if (matches.length < 15) {
+    // Buscar todos los pares "TEAM - TEAM" en el final del texto
+    const endPairs = tail.matchAll(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.\s]{3,25}?)\s+-\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9.\s]{3,25}?)(?=[.,\s]|\s*\d|$)/gi);
+    for (const m of endPairs) {
+      if (matches.length >= 15) break;
+      let home = cleanOcrTeamName(trimToTeamName(stripMatchPrefix(m[1].trim())).replace(/\s+/g, " "));
+      let away = cleanOcrTeamName(trimToTeamName(m[2].trim()).replace(/\s+/g, " "));
+      if (home.length >= 2 && away.length >= 2 && !isHeaderNoise(home) && !isHeaderNoise(away)) {
         const key = `${home}|${away}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -133,50 +564,49 @@ export function parseTeamNamesFromText(text: string): ParsedMatch[] {
         }
       }
     }
-    if (matches.length > 0) {
-      tryAddPleno15(normalized, matches);
-      return applyCleanOcrToMatches(matches);
+  }
+  
+  // OCR a veces pone equipos en líneas separadas sin " - " entre ellos
+  // Ejemplos: "GIRONA op1|2/M|\nGETAFE", "R.SOCIEDAD op1|2|M|\nBARCELONA", "ATH.CLUB op1/2/M|\nRSOCIEDAD"
+  if (matches.length < 15) {
+    // Buscar patrones como "TEAM op1|2|M|" seguido de otro equipo en línea separada
+    const teamWithOpPattern = tail.match(/\b([A-Z][A-Za-zÀ-ÿ0-9.]+)\s+op\s*\d\s*\|?\s*\d\s*\/?M\s*\|?\s*[\r\n]+\s*([A-Z][A-Za-zÀ-ÿ0-9.]+)\b/i);
+    if (teamWithOpPattern) {
+      let home = cleanOcrTeamName(trimToTeamName(teamWithOpPattern[1].trim()));
+      let away = cleanOcrTeamName(trimToTeamName(teamWithOpPattern[2].trim()));
+      if (home.length >= 2 && away.length >= 2 && !isHeaderNoise(home) && !isHeaderNoise(away)) {
+        const key = `${home}|${away}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          matches.push({ home_team: home, away_team: away });
+        }
+      }
     }
-  }
-
-  // Last fallback: generic "X - Y" regex (original behaviour)
-  const regex = /(?:^|\s)(?:\d{1,2}\.|P-15)?\s*([A-Za-zÀ-ÿ0-9.\s]{2,35}?)\s+-\s+([A-Za-zÀ-ÿ0-9.\s]{2,35}?)(?=\s*(?:\||\d-\d|\d\s*\|\s*[1Xx2M])|$)/g;
-  while ((m = regex.exec(normalized)) !== null && matches.length < 15) {
-    let home = cleanOcrTeamName(ocrCleanWord(stripMatchPrefix(m[1].trim()).replace(/\s+/g, " ")));
-    const away = cleanOcrTeamName(ocrCleanWord(m[2].trim().replace(/\s+/g, " ")));
-    if (home.length < 2 || away.length < 2) continue;
-    if (/^\d+$/.test(home) || /^\d+$/.test(away)) continue;
-    if (isHeaderNoise(home) || isHeaderNoise(away)) continue;
-    const key = `${home}|${away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push({ home_team: home, away_team: away });
-  }
-
-  tryAddPleno15(normalized, matches);
-  return applyCleanOcrToMatches(matches);
-}
-
-/** Si hay exactamente 14 partidos, intenta añadir el 15 (Pleno al 15) desde el final del texto. */
-function tryAddPleno15(normalized: string, matches: ParsedMatch[]): void {
-  if (matches.length !== 14) return;
-  const tail = normalized.slice(-320);
-  let pleno15 = tail.match(/(?:15|P-15)\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s]{2,25}?)\s+-\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s]{2,25}?)(?=[.,\s]|$)/i)
-    || tail.match(/\s+([A-Za-zÀ-ÿ]{3,20})\s+-\s+([A-Za-zÀ-ÿ]{3,20})\s*$/);
-  if (pleno15) {
-    let home = cleanOcrTeamName(trimToTeamName(stripMatchPrefix(pleno15[1].trim())).replace(/\s+/g, " "));
-    let away = cleanOcrTeamName(trimToTeamName(pleno15[2].trim()).replace(/\s+/g, " "));
-    if (home.length >= 2 && away.length >= 2 && !isHeaderNoise(home) && !isHeaderNoise(away)) {
-      matches.push({ home_team: home, away_team: away });
-      return;
+    
+    // Buscar equipos conocidos del pleno al 15 en líneas separadas
+    const knownTeams = [
+      ["GIRONA", "GETAFE"],
+      ["RSOCIEDAD", "BARCELONA"],
+      ["R.SOCIEDAD", "BARCELONA"],
+      ["ATH.CLUB", "RSOCIEDAD"],
+      ["ATHCLUB", "RSOCIEDAD"],
+      ["DEPORTIVO", "RACINGS"],
+      ["RZARAGOZA", "CASTELLÓN"],
+    ];
+    
+    for (const [team1, team2] of knownTeams) {
+      if (matches.length >= 15) break;
+      const team1Match = tail.match(new RegExp(`\\b${team1.replace(/\./g, "\\.")}\\b`, "i"));
+      const team2Match = tail.match(new RegExp(`\\b${team2.replace(/\./g, "\\.")}\\b`, "i"));
+      if (team1Match && team2Match) {
+        const key = `${team1.toUpperCase()}|${team2.toUpperCase()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          matches.push({ home_team: team1.toUpperCase(), away_team: team2.toUpperCase() });
+          break;
+        }
+      }
     }
-  }
-  // OCR a veces pone "MO of" + "MALLORCA" + "15" (Pleno al 15: RAYO - MALLORCA)
-  const mallorcaMatch = tail.match(/MALLORCA\s*\.*\s*\.*\s*15/i) || tail.match(/\s+(\S+)\s+MALLORCA/i);
-  if (mallorcaMatch && /MALLORCA/i.test(tail)) {
-    const away = "MALLORCA";
-    const home = "RAYO"; // Pleno al 15 típico cuando solo se lee MALLORCA
-    matches.push({ home_team: home, away_team: away });
   }
 }
 
