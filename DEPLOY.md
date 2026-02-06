@@ -10,7 +10,7 @@ Todo lo que necesitas es **gratis**: Vercel (hosting) y Supabase (base de datos)
    ```bash
    npm i -g vercel
    ```
-2. En la carpeta del proyecto (`football-predictions`), ejecuta:
+2. En la carpeta del proyecto (`03-La_Quiniela`), ejecuta:
    ```bash
    vercel
    ```

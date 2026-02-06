@@ -34,7 +34,7 @@ Para comprobar: abre una terminal y escribe `git --version`. Debe salir algo com
 
 ## Paso 2: Inicializar Git y hacer el primer commit (en tu PC)
 
-Abre una terminal **en la carpeta del proyecto** (`football-predictions`). En Cursor: Terminal → New Terminal (o `Ctrl+ñ`). Luego ejecuta **cada línea** (Enter después de cada una). **No copies** las palabras `bash` ni las comillas invertidas ``` — solo el comando.
+Abre una terminal **en la carpeta del proyecto** (`03-La_Quiniela`). En Cursor: Terminal → New Terminal (o `Ctrl+ñ`). Luego ejecuta **cada línea** (Enter después de cada una). **No copies** las palabras `bash` ni las comillas invertidas ``` — solo el comando.
 
 Si es la primera vez que usas Git en este PC, configura nombre y email (usa el mismo email que en GitHub):
 
@@ -46,7 +46,7 @@ git config --global user.name "Tu Nombre"
 Después, en la carpeta del proyecto:
 
 ```bash
-cd c:\Users\xaviv\Documents\Cursor\football-predictions
+cd c:\Users\xaviv\Documents\Cursor\03-La_Quiniela
 ```
 
 ```bash
@@ -143,7 +143,7 @@ Si el login o el registro fallan, revisa que en Supabase hayas puesto bien la **
 
 Cuando cambies código en el proyecto:
 
-1. En la terminal, dentro de `football-predictions`:
+1. En la terminal, dentro de `03-La_Quiniela`:
    ```bash
    git add .
    git commit -m "Descripción del cambio"
