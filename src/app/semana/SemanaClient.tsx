@@ -133,6 +133,7 @@ export default function SemanaClient({
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th className="py-2 pr-2 text-center">#</th>
                 <th className="py-2 pr-2">Partido</th>
+                <th className="py-2 pr-2 text-center font-medium text-slate-500">Resultado</th>
                 <th className="py-2 text-left">1 X 2</th>
               </tr>
             </thead>
@@ -147,6 +148,23 @@ export default function SemanaClient({
                     <td className="py-2 pr-2 text-center text-slate-500">{m.match_order}</td>
                     <td className="py-2 pr-2 font-medium text-slate-800">
                       {m.home_team} – {m.away_team}
+                    </td>
+                    <td className="py-2 pr-2 text-center">
+                      {m.match_order <= 14 ? (
+                        m.result_1x2 != null ? (
+                          <span className="rounded bg-slate-200 px-2 py-0.5 font-semibold text-slate-800">
+                            {m.result_1x2}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">–</span>
+                        )
+                      ) : m.result_home != null && m.result_away != null ? (
+                        <span className="rounded bg-slate-200 px-2 py-0.5 font-semibold text-slate-800">
+                          {m.result_home}-{m.result_away}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">–</span>
+                      )}
                     </td>
                     <td className="py-2 text-left">
                       {m.match_order <= 14 ? (
@@ -258,6 +276,7 @@ export default function SemanaClient({
           <thead>
             <tr className="border-b border-slate-200 bg-slate-100/80">
               <th className="px-3 py-2 text-left font-medium text-slate-700">Puntos</th>
+              <td className="px-2 py-2" />
               {usersInOrder.map((u) => (
                 <td key={u.id} className="px-2 py-2 text-center">
                   <span className="rounded bg-slate-800 px-2 py-0.5 text-xs font-medium text-white">
@@ -268,6 +287,7 @@ export default function SemanaClient({
             </tr>
             <tr className="border-b border-slate-200 bg-slate-50">
               <th className="px-3 py-2 text-left font-medium text-slate-700">Nombre</th>
+              <th className="px-2 py-2 text-center font-medium text-slate-600">Resultado</th>
               {usersInOrder.map((u) => (
                 <th key={u.id} className="px-2 py-2 text-center font-medium text-slate-700">
                   {u.quiniela_name}
@@ -287,6 +307,23 @@ export default function SemanaClient({
               >
                 <td className="px-3 py-2 font-medium text-slate-800">
                   {m.match_order}. {m.home_team} – {m.away_team}
+                </td>
+                <td className="px-2 py-2 text-center">
+                  {m.match_order === 15 ? (
+                    m.result_home != null && m.result_away != null ? (
+                      <span className="rounded bg-slate-200 px-2 py-0.5 font-semibold text-slate-800">
+                        {m.result_home}-{m.result_away}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">–</span>
+                    )
+                  ) : m.result_1x2 != null ? (
+                    <span className="rounded bg-slate-200 px-2 py-0.5 font-semibold text-slate-800">
+                      {m.result_1x2}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">–</span>
+                  )}
                 </td>
                 {m.match_order === 15 ? (
                   <td
