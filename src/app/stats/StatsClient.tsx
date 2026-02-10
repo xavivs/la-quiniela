@@ -378,7 +378,7 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
                   <LabelList
                     dataKey="premios"
                     position="insideEnd"
-                    formatter={(value: number) => `${value.toFixed(2)} €`}
+                    formatter={(value) => `${Number(value ?? 0).toFixed(2)} €`}
                     style={{ fill: "#fff", fontWeight: 700, fontSize: 13 }}
                   />
                   {barDataPrizes.map((entry) => (
