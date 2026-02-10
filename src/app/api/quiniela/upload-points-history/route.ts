@@ -117,13 +117,25 @@ export async function POST(request: Request) {
       );
     }
 
+    // Obtener temporada activa para las jornadas históricas (primero para usarla después)
+    const { data: activeSeason } = await supabase
+      .from("seasons")
+      .select("name")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    const seasonName = activeSeason?.name ?? "2024-25";
+
     // Obtener jornadas existentes (de todas las temporadas para evitar duplicados)
     const { data: jornadas } = await supabase.from("jornadas").select("id, number, season").order("number", { ascending: true });
     const jornadaNumberToId: Record<number, string> = {};
-    // Si hay múltiples jornadas con el mismo número, usar la más reciente o la de la temporada activa
+    // Si hay múltiples jornadas con el mismo número, preferir la de la temporada activa, sino la más reciente
     for (const j of jornadas ?? []) {
-      // Si ya existe una jornada con este número, mantener la existente (evitar sobrescribir)
       if (!jornadaNumberToId[j.number]) {
+        jornadaNumberToId[j.number] = j.id;
+      } else if (j.season === seasonName) {
+        // Si encontramos una jornada de la temporada activa, usarla en lugar de la anterior
         jornadaNumberToId[j.number] = j.id;
       }
     }
@@ -143,16 +155,6 @@ export async function POST(request: Request) {
         jornadasNeeded.add(parseInt(jornadaMatch[1], 10));
       }
     }
-
-    // Obtener temporada activa para las jornadas históricas
-    const { data: activeSeason } = await supabase
-      .from("seasons")
-      .select("name")
-      .eq("is_active", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-    const seasonName = activeSeason?.name ?? "2024-25";
     const errors: string[] = [];
 
     // Crear jornadas históricas que falten
@@ -180,6 +182,7 @@ export async function POST(request: Request) {
     // Procesar filas de jornadas
     const pointsToInsert: Array<{ user_id: string; jornada_id: string; points: number }> = [];
     let rowsProcessed = 0;
+    const jornadasProcessedSet = new Set<number>();
 
     for (let rowIdx = jornadasStartRow; rowIdx < data.length; rowIdx++) {
       const row = data[rowIdx] as unknown[];
@@ -214,8 +217,25 @@ export async function POST(request: Request) {
           .select("id")
           .single();
         if (errJ) {
-          errors.push(`Error al crear jornada ${jornadaNumber}: ${errJ.message}`);
-          continue;
+          // Si el error es por duplicado (unique constraint), buscar la jornada existente
+          if (errJ.message.includes("duplicate") || errJ.message.includes("unique")) {
+            const { data: existingJornada } = await supabase
+              .from("jornadas")
+              .select("id")
+              .eq("number", jornadaNumber)
+              .eq("season", seasonName)
+              .single();
+            if (existingJornada) {
+              jornadaNumberToId[jornadaNumber] = existingJornada.id;
+              jornadaId = existingJornada.id;
+            } else {
+              errors.push(`Error al crear jornada ${jornadaNumber}: ${errJ.message}`);
+              continue;
+            }
+          } else {
+            errors.push(`Error al crear jornada ${jornadaNumber}: ${errJ.message}`);
+            continue;
+          }
         } else if (newJornada) {
           jornadaNumberToId[jornadaNumber] = newJornada.id;
           jornadaId = newJornada.id;
@@ -227,6 +247,9 @@ export async function POST(request: Request) {
           continue;
         }
       }
+      
+      // Marcar esta jornada como procesada
+      jornadasProcessedSet.add(jornadaNumber);
 
       // Leer puntos por columna
       for (const [colIdx, quinielaName] of Object.entries(columnToName)) {
@@ -319,12 +342,9 @@ export async function POST(request: Request) {
     if (jornadasCreated.length > 0) {
       messageParts.push(`Se crearon ${jornadasCreated.length} jornada(s) histórica(s): ${jornadasCreated.sort((a, b) => a - b).join(", ")}`);
     }
-    const jornadasProcessed = new Set(pointsToInsert.map(p => {
-      const jornadaNum = Object.entries(jornadaNumberToId).find(([_, id]) => id === p.jornada_id)?.[0];
-      return jornadaNum ? parseInt(jornadaNum, 10) : null;
-    })).filter(n => n !== null) as number[];
-    if (jornadasProcessed.length > 0) {
-      messageParts.push(`Jornadas procesadas: ${jornadasProcessed.sort((a, b) => a - b).join(", ")}`);
+    const jornadasProcessedList = Array.from(jornadasProcessedSet).sort((a, b) => a - b);
+    if (jornadasProcessedList.length > 0) {
+      messageParts.push(`Jornadas procesadas: ${jornadasProcessedList.join(", ")}`);
     }
     messageParts.push(`Se procesaron ${inserted} registros de puntos históricos.`);
     if (errors.length > 0) {
