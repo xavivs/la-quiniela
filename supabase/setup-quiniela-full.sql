@@ -97,6 +97,17 @@ drop policy if exists "Quiniela predictions insert own" on public.quiniela_predi
 create policy "Quiniela predictions insert own" on public.quiniela_predictions for insert with check (auth.uid() = user_id);
 drop policy if exists "Quiniela predictions update own" on public.quiniela_predictions;
 create policy "Quiniela predictions update own" on public.quiniela_predictions for update using (auth.uid() = user_id);
+-- Políticas para superadmin: puede modificar predicciones de cualquier usuario
+drop policy if exists "Quiniela predictions insert by superadmin" on public.quiniela_predictions;
+create policy "Quiniela predictions insert by superadmin" 
+  on public.quiniela_predictions 
+  for insert 
+  with check (public.current_user_role() = 'superadmin');
+drop policy if exists "Quiniela predictions update by superadmin" on public.quiniela_predictions;
+create policy "Quiniela predictions update by superadmin" 
+  on public.quiniela_predictions 
+  for update 
+  using (public.current_user_role() = 'superadmin');
 
 -- 9. Trigger: crear fila en public.users al registrarse (con quiniela_name si viene en metadata)
 create or replace function public.handle_new_user()

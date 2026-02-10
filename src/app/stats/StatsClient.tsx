@@ -39,9 +39,10 @@ type Props = {
   entries: RankingEntry[];
   history: PointsHistoryEntry[];
   seasonName: string;
+  prizesByUser: Record<string, number>;
 };
 
-export default function StatsClient({ entries, history, seasonName }: Props) {
+export default function StatsClient({ entries, history, seasonName, prizesByUser }: Props) {
   const [chartUsers, setChartUsers] = useState<Set<string>>(() => new Set(QUINIELA_NAMES));
 
   const toggleChartUser = (name: string) => {
@@ -118,6 +119,16 @@ export default function StatsClient({ entries, history, seasonName }: Props) {
         };
       }),
     [bestJornadaByUser]
+  );
+
+  const barDataPrizes = useMemo(
+    () =>
+      QUINIELA_NAMES.map((name) => ({
+        name,
+        premios: prizesByUser[name] ?? 0,
+        color: getChartColor(name),
+      })).filter((d) => d.premios > 0), // Solo mostrar usuarios con premios
+    [prizesByUser]
   );
 
   const averageByUser = useMemo(() => {
@@ -478,6 +489,37 @@ export default function StatsClient({ entries, history, seasonName }: Props) {
         </div>
       </div>
 
+      {/* Gráfico de premios */}
+      {barDataPrizes.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-yellow-50 to-white p-6 shadow-lg max-md:p-4">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-slate-800 max-md:mb-3 max-md:text-lg">
+            <span>💰</span> Premios ganados
+          </h2>
+          <div className="h-80 w-full max-md:h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barDataPrizes} layout="vertical" margin={{ left: 50, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis 
+                  type="number" 
+                  tick={{ fontSize: 11 }} 
+                  tickFormatter={(value) => `${value.toFixed(2)} €`}
+                />
+                <YAxis type="category" dataKey="name" width={48} tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  formatter={(value) => [`${Number(value).toFixed(2)} €`, "Premios"]}
+                  contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                />
+                <Bar dataKey="premios" name="Premios" radius={[0, 8, 8, 0]}>
+                  {barDataPrizes.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
       {/* Tarjetas: mejor jornada + promedio + regularidad (2 filas de 4) */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
         <h2 className="mb-2 flex items-center gap-2 text-xl font-bold text-slate-800">
@@ -503,6 +545,11 @@ export default function StatsClient({ entries, history, seasonName }: Props) {
                   <div>Mejor: {best ? `${best.points} pts (J${best.jornada})` : "—"}</div>
                   <div>Promedio: {avg > 0 ? avg.toFixed(1) : "—"} pts</div>
                   {std > 0 && <div className="text-slate-500">σ ≈ {std.toFixed(1)}</div>}
+                  {(prizesByUser[name] ?? 0) > 0 && (
+                    <div className="mt-1 font-semibold text-green-700">
+                      💰 {(prizesByUser[name] ?? 0).toFixed(2)} €
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -516,24 +563,32 @@ export default function StatsClient({ entries, history, seasonName }: Props) {
           <span>🏁</span> Ranking completo
         </h2>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 max-md:grid-cols-1">
-          {entries.map((entry, i) => (
-            <div
-              key={entry.user_id || entry.quiniela_name}
-              className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"
-            >
-              <div className="flex items-center gap-3">
-                <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white ${
-                    i === 0 ? "bg-amber-500" : i === 1 ? "bg-slate-400" : i === 2 ? "bg-amber-700" : "bg-slate-600"
-                  }`}
-                >
-                  {i + 1}
-                </span>
-                <span className="font-medium text-slate-800">{entry.quiniela_name}</span>
+          {entries.map((entry, i) => {
+            const prize = prizesByUser[entry.quiniela_name] ?? 0;
+            return (
+              <div
+                key={entry.user_id || entry.quiniela_name}
+                className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white ${
+                      i === 0 ? "bg-amber-500" : i === 1 ? "bg-slate-400" : i === 2 ? "bg-amber-700" : "bg-slate-600"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-800">{entry.quiniela_name}</span>
+                    {prize > 0 && (
+                      <span className="text-xs font-semibold text-green-700">💰 {prize.toFixed(2)} €</span>
+                    )}
+                  </div>
+                </div>
+                <span className="font-bold text-slate-800">{entry.total_points}</span>
               </div>
-              <span className="font-bold text-slate-800">{entry.total_points}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

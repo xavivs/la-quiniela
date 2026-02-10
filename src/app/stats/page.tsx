@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
 import { getSeasonRanking, getPointsHistory } from "@/lib/quiniela-ranking";
+import { getPrizesBySeason } from "@/lib/quiniela-prizes";
 import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
 import StatsClient from "./StatsClient";
 
@@ -25,6 +26,7 @@ export default async function StatsPage() {
 
   const entries = await getSeasonRanking();
   const history = await getPointsHistory();
+  const prizesByUser = await getPrizesBySeason(currentSeasonName);
 
   return (
     <>
@@ -38,7 +40,7 @@ export default async function StatsPage() {
             Evolución, podio, récords y comparativas de la temporada.
           </p>
         </div>
-        <StatsClient entries={entries} history={history} seasonName={currentSeasonName} />
+        <StatsClient entries={entries} history={history} seasonName={currentSeasonName} prizesByUser={prizesByUser} />
       </main>
     </>
   );
