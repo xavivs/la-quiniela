@@ -58,7 +58,7 @@ export default async function SuperadminPage() {
 
   // Obtener todas las predicciones de la temporada activa
   const jornadaIds = (jornadas ?? []).map((j) => j.id);
-  const matchIds = jornadasWithMatches.flatMap((j) => j.matches.map((m) => m.id));
+  const matchIds = jornadasWithMatches.flatMap((j) => j.matches.map((m: QMatch) => m.id));
   const { data: predictions } = await supabase
     .from("quiniela_predictions")
     .select("*")
