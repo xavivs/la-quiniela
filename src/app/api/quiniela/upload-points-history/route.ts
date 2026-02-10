@@ -127,17 +127,16 @@ export async function POST(request: Request) {
       .single();
     const seasonName = activeSeason?.name ?? "2024-25";
 
-    // Obtener jornadas existentes (de todas las temporadas para evitar duplicados)
-    const { data: jornadas } = await supabase.from("jornadas").select("id, number, season").order("number", { ascending: true });
+    // Obtener jornadas existentes SOLO de la temporada activa (para puntos históricos)
+    // Esto asegura que creemos nuevas jornadas históricas en la temporada activa si no existen
+    const { data: jornadas } = await supabase
+      .from("jornadas")
+      .select("id, number, season")
+      .eq("season", seasonName)
+      .order("number", { ascending: true });
     const jornadaNumberToId: Record<number, string> = {};
-    // Si hay múltiples jornadas con el mismo número, preferir la de la temporada activa, sino la más reciente
     for (const j of jornadas ?? []) {
-      if (!jornadaNumberToId[j.number]) {
-        jornadaNumberToId[j.number] = j.id;
-      } else if (j.season === seasonName) {
-        // Si encontramos una jornada de la temporada activa, usarla en lugar de la anterior
-        jornadaNumberToId[j.number] = j.id;
-      }
+      jornadaNumberToId[j.number] = j.id;
     }
 
     // Detectar qué jornadas necesitamos del Excel (antes de procesar filas)
@@ -205,7 +204,7 @@ export async function POST(request: Request) {
       const jornadaNumber = parseInt(jornadaMatch[1], 10);
       let jornadaId = jornadaNumberToId[jornadaNumber];
       
-      // Si la jornada no existe, intentar crearla ahora (por si acaso no se creó antes)
+      // Si la jornada no existe en la temporada activa, crearla como jornada histórica
       if (!jornadaId) {
         const { data: newJornada, error: errJ } = await supabase
           .from("jornadas")
@@ -217,8 +216,8 @@ export async function POST(request: Request) {
           .select("id")
           .single();
         if (errJ) {
-          // Si el error es por duplicado (unique constraint), buscar la jornada existente
-          if (errJ.message.includes("duplicate") || errJ.message.includes("unique")) {
+          // Si el error es por duplicado (unique constraint), buscar la jornada existente en esta temporada
+          if (errJ.message.includes("duplicate") || errJ.message.includes("unique") || errJ.code === "23505") {
             const { data: existingJornada } = await supabase
               .from("jornadas")
               .select("id")
