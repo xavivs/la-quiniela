@@ -117,11 +117,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Obtener jornadas existentes
-    const { data: jornadas } = await supabase.from("jornadas").select("id, number").order("number", { ascending: true });
+    // Obtener jornadas existentes (de todas las temporadas para evitar duplicados)
+    const { data: jornadas } = await supabase.from("jornadas").select("id, number, season").order("number", { ascending: true });
     const jornadaNumberToId: Record<number, string> = {};
+    // Si hay múltiples jornadas con el mismo número, usar la más reciente o la de la temporada activa
     for (const j of jornadas ?? []) {
-      jornadaNumberToId[j.number] = j.id;
+      // Si ya existe una jornada con este número, mantener la existente (evitar sobrescribir)
+      if (!jornadaNumberToId[j.number]) {
+        jornadaNumberToId[j.number] = j.id;
+      }
     }
 
     // Detectar qué jornadas necesitamos del Excel (antes de procesar filas)
@@ -196,10 +200,32 @@ export async function POST(request: Request) {
 
       rowsProcessed++;
       const jornadaNumber = parseInt(jornadaMatch[1], 10);
-      const jornadaId = jornadaNumberToId[jornadaNumber];
+      let jornadaId = jornadaNumberToId[jornadaNumber];
+      
+      // Si la jornada no existe, intentar crearla ahora (por si acaso no se creó antes)
       if (!jornadaId) {
-        errors.push(`Jornada ${jornadaNumber} no se pudo crear o encontrar.`);
-        continue;
+        const { data: newJornada, error: errJ } = await supabase
+          .from("jornadas")
+          .insert({
+            number: jornadaNumber,
+            season: seasonName,
+            is_historical: true,
+          })
+          .select("id")
+          .single();
+        if (errJ) {
+          errors.push(`Error al crear jornada ${jornadaNumber}: ${errJ.message}`);
+          continue;
+        } else if (newJornada) {
+          jornadaNumberToId[jornadaNumber] = newJornada.id;
+          jornadaId = newJornada.id;
+          if (!jornadasCreated.includes(jornadaNumber)) {
+            jornadasCreated.push(jornadaNumber);
+          }
+        } else {
+          errors.push(`Jornada ${jornadaNumber} no se pudo crear.`);
+          continue;
+        }
       }
 
       // Leer puntos por columna
@@ -292,6 +318,13 @@ export async function POST(request: Request) {
     const messageParts = [];
     if (jornadasCreated.length > 0) {
       messageParts.push(`Se crearon ${jornadasCreated.length} jornada(s) histórica(s): ${jornadasCreated.sort((a, b) => a - b).join(", ")}`);
+    }
+    const jornadasProcessed = new Set(pointsToInsert.map(p => {
+      const jornadaNum = Object.entries(jornadaNumberToId).find(([_, id]) => id === p.jornada_id)?.[0];
+      return jornadaNum ? parseInt(jornadaNum, 10) : null;
+    })).filter(n => n !== null) as number[];
+    if (jornadasProcessed.length > 0) {
+      messageParts.push(`Jornadas procesadas: ${jornadasProcessed.sort((a, b) => a - b).join(", ")}`);
     }
     messageParts.push(`Se procesaron ${inserted} registros de puntos históricos.`);
     if (errors.length > 0) {
