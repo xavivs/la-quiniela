@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -31,9 +29,6 @@ const CHART_COLORS_BY_NAME: Record<string, string> = {
 function getChartColor(name: string): string {
   return CHART_COLORS_BY_NAME[name] ?? "#64748b";
 }
-const CHART_COLORS_ARRAY = ["Xavi", "Laura", "Montse", "Lluís", "Jordi", "Neus", "Denci", "Marià"].map(
-  (n) => CHART_COLORS_BY_NAME[n] ?? "#64748b"
-);
 
 type Props = {
   entries: RankingEntry[];
@@ -43,48 +38,6 @@ type Props = {
 };
 
 export default function StatsClient({ entries, history, seasonName, prizesByUser }: Props) {
-  const [chartUsers, setChartUsers] = useState<Set<string>>(() => new Set(QUINIELA_NAMES));
-
-  const toggleChartUser = (name: string) => {
-    setChartUsers((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  // Evolución: puntos acumulados
-  const evolutionData = useMemo(() => {
-    const sorted = [...history].sort((a, b) => a.jornada_number - b.jornada_number);
-    const cumulative: Record<string, number> = {};
-    const result: { jornada: number; [key: string]: number }[] = [];
-    for (const h of sorted) {
-      const row: { jornada: number; [key: string]: number } = { jornada: h.jornada_number };
-      for (const [name, pts] of Object.entries(h.points_by_user)) {
-        cumulative[name] = (cumulative[name] ?? 0) + pts;
-        row[name] = cumulative[name];
-      }
-      for (const name of QUINIELA_NAMES) {
-        if (row[name] == null) row[name] = cumulative[name] ?? 0;
-      }
-      result.push(row);
-    }
-    return result;
-  }, [history]);
-
-  // Puntos por jornada (no acumulados), escala 0–15
-  const perJornadaData = useMemo(() => {
-    const sorted = [...history].sort((a, b) => a.jornada_number - b.jornada_number);
-    return sorted.map((h) => {
-      const row: { jornada: number; [key: string]: number } = { jornada: h.jornada_number };
-      for (const name of QUINIELA_NAMES) {
-        row[name] = h.points_by_user[name] ?? 0;
-      }
-      return row;
-    });
-  }, [history]);
-
   const bestJornadaByUser = useMemo(() => {
     const best: Record<string, { jornada: number; points: number }> = {};
     for (const h of history) {
@@ -127,7 +80,9 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
         name,
         premios: prizesByUser[name] ?? 0,
         color: getChartColor(name),
-      })).filter((d) => d.premios > 0), // Solo mostrar usuarios con premios
+      }))
+        .filter((d) => d.premios > 0)
+        .sort((a, b) => b.premios - a.premios), // De más a menos premios
     [prizesByUser]
   );
 
@@ -176,26 +131,14 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
     return withData[0]?.name ?? null;
   }, [regularityByUser, averageByUser]);
 
-  // Jornada récord: jornada con más puntos totales sumando todos
-  const recordJornada = useMemo(() => {
-    if (history.length === 0) return null;
-    let best = { jornada: 0, total: 0 };
+  const scoreGe10Count = useMemo(() => {
+    let count = 0;
     for (const h of history) {
-      const total = Object.values(h.points_by_user).reduce((a, b) => a + b, 0);
-      if (total > best.total) best = { jornada: h.jornada_number, total };
-    }
-    return best;
-  }, [history]);
-
-  // Score >= 10 en una jornada
-  const scoreGe10 = useMemo(() => {
-    const list: Array<{ jornada: number; user: string; points: number }> = [];
-    for (const h of history) {
-      for (const [name, points] of Object.entries(h.points_by_user)) {
-        if (points >= 10) list.push({ jornada: h.jornada_number, user: name, points });
+      for (const points of Object.values(h.points_by_user)) {
+        if (points >= 10) count += 1;
       }
     }
-    return list.sort((a, b) => b.points - a.points);
+    return count;
   }, [history]);
 
   const top3 = entries.slice(0, 3);
@@ -222,7 +165,8 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
             </div>
             <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm max-md:p-3">
               <div className="text-xs font-medium uppercase tracking-wider text-slate-400">Score ≥10</div>
-              <div className="mt-1 text-2xl font-bold max-md:text-xl">{scoreGe10.length}</div>
+              <div className="mt-1 text-2xl font-bold max-md:text-xl">{scoreGe10Count}</div>
+              <div className="text-sm text-slate-300">veces</div>
             </div>
             <div className="rounded-xl bg-white/10 p-4 backdrop-blur-sm max-md:p-3">
               <div className="text-xs font-medium uppercase tracking-wider text-slate-400">Más regular</div>
@@ -281,158 +225,79 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
         </div>
       )}
 
-      {/* Jornada récord + Score ≥10 en una fila */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {recordJornada && (
-          <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-6 shadow-md max-md:p-4">
-            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-800 max-md:text-base">
-              <span>📈</span> Jornada récord
-            </h3>
-            <p className="mt-2 text-3xl font-bold text-emerald-700 max-md:text-2xl">
-              Jornada {recordJornada.jornada}
-            </p>
-            <p className="text-slate-600">
-              {recordJornada.total} puntos totales entre todos
-            </p>
-          </div>
-        )}
-        {scoreGe10.length > 0 && (
-          <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6 shadow-md">
-            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-800">
-              <span>⭐</span> Score ≥10
-            </h3>
-            <div className="mt-3 space-y-2">
-              {scoreGe10.slice(0, 8).map((w, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between rounded-lg bg-white/80 py-2 px-3"
-                >
-                  <span className="font-medium text-slate-800">{w.user}</span>
-                  <span className="text-sm text-slate-500">
-                    Jornada {w.jornada} · {w.points} pts
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Gráfico evolutivo */}
+      {/* Ranking completo */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-md:p-4">
-        <h2 className="mb-1 flex items-center gap-2 text-xl font-bold text-slate-800 max-md:text-lg">
-          <span>📉</span> Evolución de puntos acumulados
+        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-slate-800 max-md:mb-3 max-md:text-lg">
+          <span>🏁</span> Ranking completo
         </h2>
-        <p className="mb-4 text-sm text-slate-500 max-md:mb-3 max-md:text-xs">
-          Activa o desactiva cada usuario para comparar.
-        </p>
-        <div className="mb-4 flex flex-wrap gap-2 max-md:mb-3">
-          {QUINIELA_NAMES.map((name, i) => (
-            <label
-              key={name}
-              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-sm transition hover:bg-slate-50"
-            >
-              <input
-                type="checkbox"
-                checked={chartUsers.has(name)}
-                onChange={() => toggleChartUser(name)}
-                className="rounded border-slate-300"
-              />
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: getChartColor(name) }}
-              />
-              <span>{name}</span>
-            </label>
-          ))}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 max-md:grid-cols-1">
+          {entries.map((entry, i) => {
+            const prize = prizesByUser[entry.quiniela_name] ?? 0;
+            return (
+              <div
+                key={entry.user_id || entry.quiniela_name}
+                className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white ${
+                      i === 0 ? "bg-amber-500" : i === 1 ? "bg-slate-400" : i === 2 ? "bg-amber-700" : "bg-slate-600"
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-800">{entry.quiniela_name}</span>
+                    {prize > 0 && (
+                      <span className="text-xs font-semibold text-green-700">💰 {prize.toFixed(2)} €</span>
+                    )}
+                  </div>
+                </div>
+                <span className="font-bold text-slate-800">{entry.total_points}</span>
+              </div>
+            );
+          })}
         </div>
-        {evolutionData.length > 0 ? (
-          <div className="h-80 w-full max-md:h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={evolutionData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <defs>
-                  {CHART_COLORS_ARRAY.map((c, i) => (
-                    <linearGradient key={i} id={`fill-${i}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={c} stopOpacity={0.35} />
-                      <stop offset="100%" stopColor={c} stopOpacity={0} />
-                    </linearGradient>
-                  ))}
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="jornada" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip
-                  formatter={(value, name) => [value ?? 0, name ?? ""]}
-                  labelFormatter={(label) => `Jornada ${label}`}
-                  contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
-                />
-                <Legend />
-                {QUINIELA_NAMES.filter((n) => chartUsers.has(n)).map((name, i) => (
-                  <Area
-                    key={name}
-                    type="monotone"
-                    dataKey={name}
-                    stroke={CHART_COLORS_ARRAY[QUINIELA_NAMES.indexOf(name)] ?? CHART_COLORS_ARRAY[i]}
-                    strokeWidth={2.5}
-                    fill={`url(#fill-${QUINIELA_NAMES.indexOf(name)})`}
-                    connectNulls
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <p className="py-8 text-center text-slate-500">No hay datos de jornadas.</p>
-        )}
-
-        {/* Puntos por jornada (escala 0–15) */}
-        {perJornadaData.length > 0 && (
-          <>
-            <h3 className="mt-8 mb-2 flex items-center gap-2 text-lg font-bold text-slate-800 max-md:mt-6 max-md:text-base">
-              Puntos de cada jornada (0–15)
-            </h3>
-            <div className="h-80 w-full max-md:h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={perJornadaData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <defs>
-                    {CHART_COLORS_ARRAY.map((c, i) => (
-                      <linearGradient key={i} id={`fillJ-${i}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={c} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={c} stopOpacity={0} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="jornada" tick={{ fontSize: 12 }} />
-                  <YAxis domain={[0, 15]} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(value, name) => [value ?? 0, name ?? ""]}
-                    labelFormatter={(label) => `Jornada ${label}`}
-                    contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
-                  />
-                  <Legend />
-                  {QUINIELA_NAMES.filter((n) => chartUsers.has(n)).map((name) => {
-                    const idx = QUINIELA_NAMES.indexOf(name);
-                    return (
-                      <Area
-                        key={name}
-                        type="monotone"
-                        dataKey={name}
-                        stroke={CHART_COLORS_ARRAY[idx] ?? "#64748b"}
-                        strokeWidth={2}
-                        fill={`url(#fillJ-${idx})`}
-                        connectNulls
-                      />
-                    );
-                  })}
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </>
-        )}
       </div>
 
-      {/* Dos gráficos de barras en fila */}
+      {/* Por usuario */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
+        <h2 className="mb-2 flex items-center gap-2 text-xl font-bold text-slate-800">
+          <span>👤</span> Por usuario
+        </h2>
+        <p className="mb-4 text-sm text-slate-500">
+          σ = desviación típica: cuánto varían tus puntos jornada a jornada. Menor = más regular.
+        </p>
+        <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2 max-md:gap-3">
+          {QUINIELA_NAMES.map((name) => {
+            const best = bestJornadaByUser[name];
+            const avg = averageByUser[name] ?? 0;
+            const std = regularityByUser[name] ?? 0;
+            const color = getChartColor(name);
+            return (
+              <div
+                key={name}
+                className="rounded-xl border border-slate-200 p-4 transition hover:border-slate-300 hover:shadow-md"
+                style={{ borderLeftWidth: "4px", borderLeftColor: color }}
+              >
+                <div className="text-sm font-bold text-slate-800">{name}</div>
+                <div className="mt-2 space-y-1 text-xs text-slate-600">
+                  <div>Mejor: {best ? `${best.points} pts (J${best.jornada})` : "—"}</div>
+                  <div>Promedio: {avg > 0 ? avg.toFixed(1) : "—"} pts</div>
+                  {std > 0 && <div className="text-slate-500">σ ≈ {std.toFixed(1)}</div>}
+                  {(prizesByUser[name] ?? 0) > 0 && (
+                    <div className="mt-1 font-semibold text-green-700">
+                      💰 {(prizesByUser[name] ?? 0).toFixed(2)} €
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Puntos totales y mejor jornada */}
       <div className="grid gap-6 lg:grid-cols-2 max-md:gap-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-md:p-4">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-800 max-md:mb-3 max-md:text-base">
@@ -489,7 +354,7 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
         </div>
       </div>
 
-      {/* Gráfico de premios */}
+      {/* Premios ganados */}
       {barDataPrizes.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-yellow-50 to-white p-6 shadow-lg max-md:p-4">
           <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-slate-800 max-md:mb-3 max-md:text-lg">
@@ -497,7 +362,7 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
           </h2>
           <div className="h-80 w-full max-md:h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barDataPrizes} layout="vertical" margin={{ left: 50, right: 20 }}>
+              <BarChart data={barDataPrizes} layout="vertical" margin={{ left: 50, right: 80 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis 
                   type="number" 
@@ -509,7 +374,13 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
                   formatter={(value) => [`${Number(value).toFixed(2)} €`, "Premios"]}
                   contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
                 />
-                <Bar dataKey="premios" name="Premios" radius={[0, 8, 8, 0]}>
+                <Bar dataKey="premios" name="Premios" radius={[0, 8, 8, 0]} barSize={28}>
+                  <LabelList
+                    dataKey="premios"
+                    position="insideEnd"
+                    formatter={(value: number) => `${value.toFixed(2)} €`}
+                    style={{ fill: "#fff", fontWeight: 700, fontSize: 13 }}
+                  />
                   {barDataPrizes.map((entry) => (
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
@@ -519,78 +390,6 @@ export default function StatsClient({ entries, history, seasonName, prizesByUser
           </div>
         </div>
       )}
-
-      {/* Tarjetas: mejor jornada + promedio + regularidad (2 filas de 4) */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
-        <h2 className="mb-2 flex items-center gap-2 text-xl font-bold text-slate-800">
-          <span>👤</span> Por usuario
-        </h2>
-        <p className="mb-4 text-sm text-slate-500">
-          σ = desviación típica: cuánto varían tus puntos jornada a jornada. Menor = más regular.
-        </p>
-        <div className="grid grid-cols-4 gap-4 max-md:grid-cols-2 max-md:gap-3">
-          {QUINIELA_NAMES.map((name) => {
-            const best = bestJornadaByUser[name];
-            const avg = averageByUser[name] ?? 0;
-            const std = regularityByUser[name] ?? 0;
-            const color = getChartColor(name);
-            return (
-              <div
-                key={name}
-                className="rounded-xl border border-slate-200 p-4 transition hover:border-slate-300 hover:shadow-md"
-                style={{ borderLeftWidth: "4px", borderLeftColor: color }}
-              >
-                <div className="text-sm font-bold text-slate-800">{name}</div>
-                <div className="mt-2 space-y-1 text-xs text-slate-600">
-                  <div>Mejor: {best ? `${best.points} pts (J${best.jornada})` : "—"}</div>
-                  <div>Promedio: {avg > 0 ? avg.toFixed(1) : "—"} pts</div>
-                  {std > 0 && <div className="text-slate-500">σ ≈ {std.toFixed(1)}</div>}
-                  {(prizesByUser[name] ?? 0) > 0 && (
-                    <div className="mt-1 font-semibold text-green-700">
-                      💰 {(prizesByUser[name] ?? 0).toFixed(2)} €
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Ranking completo compacto */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg max-md:p-4">
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold text-slate-800 max-md:mb-3 max-md:text-lg">
-          <span>🏁</span> Ranking completo
-        </h2>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 max-md:grid-cols-1">
-          {entries.map((entry, i) => {
-            const prize = prizesByUser[entry.quiniela_name] ?? 0;
-            return (
-              <div
-                key={entry.user_id || entry.quiniela_name}
-                className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white ${
-                      i === 0 ? "bg-amber-500" : i === 1 ? "bg-slate-400" : i === 2 ? "bg-amber-700" : "bg-slate-600"
-                    }`}
-                  >
-                    {i + 1}
-                  </span>
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-800">{entry.quiniela_name}</span>
-                    {prize > 0 && (
-                      <span className="text-xs font-semibold text-green-700">💰 {prize.toFixed(2)} €</span>
-                    )}
-                  </div>
-                </div>
-                <span className="font-bold text-slate-800">{entry.total_points}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }

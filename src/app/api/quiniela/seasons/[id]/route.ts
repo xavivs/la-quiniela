@@ -41,20 +41,24 @@ export async function DELETE(
       );
     }
 
-    // Verificar si tiene jornadas asociadas
+    // Eliminar todas las jornadas de esta temporada (cascada borra partidos, predicciones, puntos históricos, premios)
     const { data: jornadas } = await supabase
       .from("jornadas")
       .select("id")
-      .eq("season", season.name)
-      .limit(1);
+      .eq("season", season.name);
 
     if (jornadas && jornadas.length > 0) {
-      return NextResponse.json(
-        {
-          error: `No se puede eliminar la temporada "${season.name}" porque tiene ${jornadas.length} jornada(s) asociada(s). Elimina las jornadas primero.`,
-        },
-        { status: 400 }
-      );
+      const { error: deleteJornadasError } = await supabase
+        .from("jornadas")
+        .delete()
+        .eq("season", season.name);
+
+      if (deleteJornadasError) {
+        return NextResponse.json(
+          { error: `Error al eliminar las jornadas: ${deleteJornadasError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     // Eliminar la temporada
@@ -69,7 +73,9 @@ export async function DELETE(
 
     return NextResponse.json({
       ok: true,
-      message: `Temporada "${season.name}" eliminada correctamente.`,
+      message: jornadas?.length
+        ? `Temporada "${season.name}" y sus ${jornadas.length} jornada(s) eliminadas correctamente.`
+        : `Temporada "${season.name}" eliminada correctamente.`,
     });
   } catch (err) {
     console.error("Error deleting season:", err);
