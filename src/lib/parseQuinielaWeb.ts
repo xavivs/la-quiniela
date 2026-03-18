@@ -42,6 +42,11 @@ function ocrCleanWord(w: string): string {
 function isHeaderNoise(s: string): boolean {
   const t = s.toUpperCase().trim();
   if (t.length < 2) return true;
+
+  // Allowlist: equipos reales que con OCR aparecen en mayúsculas con punto.
+  // Esta heurística es para evitar que se clasifiquen como "ruido" en pleno 15.
+  const allowedDotTeams = new Set(["R.MADRID", "AT.MADRID", "R.OVIEDO", "ATH.CLUB", "R.SOCIEDAD", "RACINGS"]);
+  if (allowedDotTeams.has(t)) return false;
   
   // Reject strings that are mostly dots or have many consecutive dots (e.g., "e.e.e", "..........")
   // But allow valid team names with a single dot like R.OVIEDO, ATH.CLUB, R.SOCIEDAD
