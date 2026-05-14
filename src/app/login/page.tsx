@@ -5,6 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+function safeDecode(s: string) {
+  try {
+    return decodeURIComponent(s.replace(/\+/g, " "));
+  } catch {
+    return s;
+  }
+}
+
 function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,11 +25,37 @@ function LoginForm() {
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
-    if (searchParams.get("passwordUpdated") === "1") {
+    const pwd = searchParams.get("passwordUpdated");
+    const authErr = searchParams.get("auth_err");
+    const authErrMsg = searchParams.get("auth_err_msg");
+
+    if (pwd === "1") {
       setMessage({
         type: "ok",
         text: "Contraseña actualizada. Inicia sesión con la nueva contraseña.",
       });
+      router.replace("/login", { scroll: false });
+      return;
+    }
+
+    if (authErr) {
+      const msgRaw = authErrMsg ? safeDecode(authErrMsg) : "";
+      const expired =
+        authErr === "otp_expired" ||
+        authErr === "access_denied" ||
+        (msgRaw && /invalid|expired|caducad/i.test(msgRaw));
+      if (expired) {
+        setMessage({
+          type: "err",
+          text: "El enlace del correo ha caducado o no es válido (solo sirve unos minutos). Pulsa «¿Olvidaste la contraseña?» y pide uno nuevo.",
+        });
+      } else {
+        const detail = authErrMsg ? safeDecode(authErrMsg) : authErr;
+        setMessage({
+          type: "err",
+          text: `No se pudo validar el enlace: ${detail.slice(0, 220)}`,
+        });
+      }
       router.replace("/login", { scroll: false });
     }
   }, [searchParams, router]);

@@ -8,7 +8,22 @@ import { updateSession } from "@/lib/supabase/middleware";
  * and the user lands on the new-password page.
  */
 export async function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
+  const path = request.nextUrl.pathname;
+  const sp = request.nextUrl.searchParams;
+
+  /** Enlace de correo caducado o inválido: Supabase añade ?error=… en la Site URL (/) */
+  if (path === "/" && sp.has("error")) {
+    const code = sp.get("error_code") || sp.get("error") || "unknown";
+    const login = new URL("/login", request.url);
+    login.searchParams.set("auth_err", code);
+    const desc = sp.get("error_description");
+    if (desc) {
+      login.searchParams.set("auth_err_msg", desc.slice(0, 400));
+    }
+    return NextResponse.redirect(login);
+  }
+
+  if (path === "/" && sp.has("code")) {
     const code = request.nextUrl.searchParams.get("code");
     if (code) {
       const target = new URL("/auth/callback", request.url);

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { AuthHashErrorRedirect } from "@/components/AuthHashErrorRedirect";
 
 export default async function Home() {
   const hasSupabase =
@@ -36,6 +37,7 @@ export default async function Home() {
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 py-12 max-md:px-4 max-md:py-8">
+      <AuthHashErrorRedirect />
       {/* Fondo con gradiente y detalle */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-700 to-teal-900" />
       <div className="absolute -right-32 -top-32 h-64 w-64 rounded-full bg-teal-500/20 blur-3xl" />
