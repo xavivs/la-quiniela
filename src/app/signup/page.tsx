@@ -41,10 +41,16 @@ export default function SignupPage() {
     }
     setLoading(true);
     setMessage(null);
+    const origin = window.location.origin;
+    const confirmNext = encodeURIComponent("/semana");
+    const emailRedirectTo = `${origin}/auth/callback?next=${confirmNext}`;
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { quiniela_name: quinielaName } },
+      options: {
+        data: { quiniela_name: quinielaName },
+        emailRedirectTo,
+      },
     });
     setLoading(false);
     if (error) {
