@@ -88,8 +88,8 @@ export default function CreateSeasonForm({ onSeasonCreated }: Props = {}) {
               </p>
               <ul className="mb-3 ml-4 list-disc text-sm text-amber-800">
                 <li>La temporada actual dejará de ser la activa</li>
-                <li>El ranking de la temporada actual quedará archivado y solo se mostrará el de la nueva temporada</li>
-                <li>Las jornadas de la temporada actual seguirán existiendo pero archivadas</li>
+                <li>El ranking y los premios (€) de la temporada actual quedarán archivados (no se borran)</li>
+                <li>Las jornadas y los premios por jornada siguen en la base de datos; puedes verlos en Admin → Temporadas archivadas</li>
                 <li>Los usuarios solo podrán votar en jornadas de la nueva temporada activa</li>
               </ul>
               <p className="text-sm font-medium text-amber-900">
