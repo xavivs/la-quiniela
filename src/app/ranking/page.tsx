@@ -5,6 +5,9 @@ import { getSeasonRanking, getPointsHistory } from "@/lib/quiniela-ranking";
 import { getPrizesBySeason, getPrizesPerJornada } from "@/lib/quiniela-prizes";
 import RankingClient from "./RankingClient";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function RankingPage() {
   const supabase = await createClient();
   const {

@@ -149,6 +149,16 @@ export default function ManageSeasons() {
                     <p className="text-sm text-slate-600">
                       Jornadas: {jornadasCount[activeSeason.name] ?? 0}
                     </p>
+                    <SeasonCostEditor
+                      season={activeSeason}
+                      onSaved={(cost) =>
+                        setSeasons((prev) =>
+                          prev.map((s) =>
+                            s.id === activeSeason.id ? { ...s, cost_per_jornada: cost } : s
+                          )
+                        )
+                      }
+                    />
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -237,6 +247,16 @@ export default function ManageSeasons() {
                           <p className="text-sm text-slate-600">
                             Jornadas: {jornadasCount[season.name] ?? 0}
                           </p>
+                          <SeasonCostEditor
+                            season={season}
+                            onSaved={(cost) =>
+                              setSeasons((prev) =>
+                                prev.map((s) =>
+                                  s.id === season.id ? { ...s, cost_per_jornada: cost } : s
+                                )
+                              )
+                            }
+                          />
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -314,20 +334,100 @@ export default function ManageSeasons() {
   );
 }
 
+function SeasonCostEditor({
+  season,
+  onSaved,
+}: {
+  season: Season;
+  onSaved: (cost: number) => void;
+}) {
+  const [cost, setCost] = useState(String(season.cost_per_jornada ?? 6));
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCost(String(season.cost_per_jornada ?? 6));
+  }, [season.cost_per_jornada]);
+
+  async function handleSave() {
+    const value = Number(cost.replace(",", "."));
+    if (Number.isNaN(value) || value < 0) {
+      setFeedback("Introduce un importe válido.");
+      return;
+    }
+
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/quiniela/seasons/${season.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cost_per_jornada: value }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        onSaved(value);
+        setFeedback("Guardado.");
+      } else {
+        setFeedback(data.error ?? "Error al guardar.");
+      }
+    } catch {
+      setFeedback("Error de conexión.");
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <label className="text-sm text-slate-600" htmlFor={`cost-${season.id}`}>
+        Coste por jornada (€):
+      </label>
+      <input
+        id={`cost-${season.id}`}
+        type="number"
+        min={0}
+        step={0.01}
+        value={cost}
+        onChange={(e) => setCost(e.target.value)}
+        className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+      />
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving}
+        className="rounded bg-slate-700 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+      >
+        {saving ? "…" : "Guardar"}
+      </button>
+      {feedback && (
+        <span className={`text-xs ${feedback === "Guardado." ? "text-green-700" : "text-red-600"}`}>
+          {feedback}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function SeasonRankingList({ seasonName }: { seasonName: string }) {
   const [ranking, setRanking] = useState<any[]>([]);
+  const [prizesByUser, setPrizesByUser] = useState<Record<string, number>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
+      setLoadError(null);
       try {
         const res = await fetch(`/api/quiniela/ranking?season=${encodeURIComponent(seasonName)}`);
         const data = await res.json();
         if (res.ok) {
           setRanking(data.ranking ?? []);
+          setPrizesByUser(data.prizesByUser ?? {});
+        } else {
+          setLoadError(data.error ?? "Error al cargar el ranking.");
         }
       } catch {
-        // Ignorar errores
+        setLoadError("Error de conexión al cargar el ranking.");
       }
       setLoading(false);
     }
@@ -335,28 +435,45 @@ function SeasonRankingList({ seasonName }: { seasonName: string }) {
   }, [seasonName]);
 
   if (loading) return <p className="text-slate-600">Cargando ranking...</p>;
+  if (loadError) return <p className="text-sm text-red-600">{loadError}</p>;
   if (ranking.length === 0) return <p className="text-slate-500">No hay datos de ranking para esta temporada.</p>;
 
+  const totalEuros = Object.values(prizesByUser).reduce((a, b) => a + b, 0);
+
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <table className="w-full">
-        <thead className="bg-slate-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">#</th>
-            <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Nombre</th>
-            <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Puntos</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200">
-          {ranking.map((entry, i) => (
-            <tr key={entry.user_id || entry.quiniela_name} className="hover:bg-slate-50">
-              <td className="px-4 py-3 text-slate-600">{i + 1}</td>
-              <td className="px-4 py-3 font-medium text-slate-800">{entry.quiniela_name}</td>
-              <td className="px-4 py-3 text-right font-medium text-slate-800">{entry.total_points}</td>
+    <div className="space-y-2">
+      {totalEuros > 0 && (
+        <p className="text-sm font-medium text-green-800">
+          Total premios temporada: {totalEuros.toFixed(2)} €
+        </p>
+      )}
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table className="w-full">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">#</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Nombre</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Puntos</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Premios (€)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {ranking.map((entry, i) => {
+              const euros = prizesByUser[entry.quiniela_name] ?? 0;
+              return (
+                <tr key={entry.user_id || entry.quiniela_name} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-slate-600">{i + 1}</td>
+                  <td className="px-4 py-3 font-medium text-slate-800">{entry.quiniela_name}</td>
+                  <td className="px-4 py-3 text-right font-medium text-slate-800">{entry.total_points}</td>
+                  <td className="px-4 py-3 text-right font-medium text-green-700">
+                    {euros > 0 ? `${euros.toFixed(2)} €` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

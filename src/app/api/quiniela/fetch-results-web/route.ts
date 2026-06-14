@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  parseQuinielaResultsByJornada,
+  type ParsedJornadaResults,
+} from "@/lib/parseQuinielaWeb";
 
 const QUINIELA_URL = "https://www.loteriasyapuestas.es/es/resultados/quiniela";
 
-async function fetchAndParseQuinielaWeb() {
+async function fetchQuinielaHtml(): Promise<string> {
   const res = await fetch(QUINIELA_URL, {
     headers: {
       "User-Agent":
@@ -12,62 +16,62 @@ async function fetchAndParseQuinielaWeb() {
     },
     next: { revalidate: 0 },
   });
-  const html = await res.text();
-
-  const results: string[] = [];
-  const oneXTwo = Array.from(
-    html.matchAll(
-      /(?:resultado|result|quiniela|celda|numero)[^>]*>[\s]*([1Xx2])[\s]*</gi
-    )
-  );
-  for (const m of oneXTwo) {
-    const v = m[1].toUpperCase();
-    if (v === "X" || v === "1" || v === "2") results.push(v);
-  }
-  if (results.length < 14) {
-    const alt = Array.from(html.matchAll(/["']([1Xx2])["']/g));
-    for (const m of alt) {
-      const v = m[1].toUpperCase();
-      if (v === "X" || v === "1" || v === "2") results.push(v);
-    }
-  }
-
-  let plenoHome: string | null = null;
-  let plenoAway: string | null = null;
-  const plenoMatch = html.match(
-    /pleno[^0-9M]*([01M2])[\s\-]+([01M2])|([01M2])[\s\-]+([01M2])[^0-9M]*pleno/i
-  );
-  if (plenoMatch) {
-    plenoHome = (plenoMatch[1] ?? plenoMatch[3])?.toUpperCase() ?? null;
-    plenoAway = (plenoMatch[2] ?? plenoMatch[4])?.toUpperCase() ?? null;
-  }
-
-  const result1x2 = results.length >= 14 ? results.slice(0, 14) : null;
-  const pleno15 =
-    plenoHome && plenoAway
-      ? { home: plenoHome as "0" | "1" | "2" | "M", away: plenoAway as "0" | "1" | "2" | "M" }
-      : null;
-
-  return {
-    result1x2,
-    pleno15,
-    raw_count: (result1x2?.length ?? 0) + (pleno15 ? 1 : 0),
-  };
+  return res.text();
 }
 
-/** GET: return parsed results from web (for testing). */
+/**
+ * Elige el bloque de la web cuyo número coincide con nuestra jornada.
+ * Antes se usaban los 14 primeros 1X2 de todo el HTML → mezcla de jornadas y datos mal guardados.
+ */
+function pickResultsBlock(
+  parsed: ParsedJornadaResults[],
+  targetJornadaNumber: number
+): { block: ParsedJornadaResults | null; hint?: string } {
+  const exact = parsed.find((p) => p.number === targetJornadaNumber);
+  if (exact?.result_1x2 && exact.result_1x2.length >= 14) {
+    return { block: exact };
+  }
+  if (exact?.result_1x2 && exact.result_1x2.length > 0) {
+    return {
+      block: exact,
+      hint: `La web solo devolvió ${exact.result_1x2.length} signos 1X2 para la jornada ${targetJornadaNumber}; completa el resto a mano.`,
+    };
+  }
+
+  const unlabeled = parsed.find((p) => p.number === 0 && p.result_1x2 && p.result_1x2.length >= 14);
+  if (unlabeled) {
+    return {
+      block: unlabeled,
+      hint: "La página no marcaba el número de jornada; se usó el único bloque completo. Comprueba que sea la jornada correcta.",
+    };
+  }
+
+  if (parsed.length === 1 && parsed[0].result_1x2 && parsed[0].result_1x2.length >= 14) {
+    return {
+      block: parsed[0],
+      hint: "Solo un bloque en el HTML; verifica que coincida con tu jornada.",
+    };
+  }
+
+  return { block: null };
+}
+
+/** GET: bloques por jornada detectados en la web (depuración). */
 export async function GET() {
   try {
-    const { result1x2, pleno15, raw_count } = await fetchAndParseQuinielaWeb();
+    const html = await fetchQuinielaHtml();
+    const byJornada = parseQuinielaResultsByJornada(html);
     return NextResponse.json({
       ok: true,
-      result_1x2: result1x2,
-      pleno_15: pleno15,
-      raw_count,
+      jornadas_detectadas: byJornada.map((j) => ({
+        number: j.number,
+        tiene_14: (j.result_1x2?.length ?? 0) >= 14,
+        pleno: j.pleno_15 != null,
+      })),
       message:
-        result1x2 || pleno15
-          ? "Datos extraídos."
-          : "No se pudieron extraer resultados (la página puede cargar datos por JS).",
+        byJornada.length > 0
+          ? "Bloques encontrados (revisa `jornadas_detectadas`)."
+          : "No se detectaron bloques (la página puede cargar por JS).",
     });
   } catch (err) {
     console.error(err);
@@ -78,8 +82,8 @@ export async function GET() {
   }
 }
 
-/** POST: fetch web and apply results to current (latest) jornada. */
-export async function POST() {
+/** POST: fetch web and apply results to the latest jornada of the active season (not global max number). Optional body: { "jornada_id": "uuid" } to target a specific jornada in that season. */
+export async function POST(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -87,26 +91,98 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { result1x2, pleno15 } = await fetchAndParseQuinielaWeb();
+    const html = await fetchQuinielaHtml();
+    const parsedAll = parseQuinielaResultsByJornada(html);
 
-    const { data: latestJornada } = await supabase
-      .from("jornadas")
-      .select("id")
-      .order("number", { ascending: false })
+    const { data: activeSeason } = await supabase
+      .from("seasons")
+      .select("name")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
       .limit(1)
       .single();
+    const seasonName = activeSeason?.name ?? "2024-25";
 
-    if (!latestJornada) {
+    let targetJornadaId: string | null = null;
+    let body: { jornada_id?: string } = {};
+    try {
+      const text = await request.text();
+      if (text.trim()) body = JSON.parse(text) as { jornada_id?: string };
+    } catch {
+      /* empty body */
+    }
+
+    if (typeof body.jornada_id === "string" && body.jornada_id.length > 0) {
+      const { data: jRow } = await supabase
+        .from("jornadas")
+        .select("id, season, number")
+        .eq("id", body.jornada_id)
+        .maybeSingle();
+      if (!jRow) {
+        return NextResponse.json({ error: "Jornada no encontrada." }, { status: 400 });
+      }
+      if (jRow.season !== seasonName) {
+        return NextResponse.json(
+          {
+            error:
+              "La jornada no pertenece a la temporada activa. Elige una jornada de la temporada actual o cambia la temporada activa.",
+          },
+          { status: 400 }
+        );
+      }
+      targetJornadaId = jRow.id;
+    } else {
+      const { data: latestJornada } = await supabase
+        .from("jornadas")
+        .select("id, number")
+        .eq("season", seasonName)
+        .order("number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!latestJornada) {
+        return NextResponse.json(
+          { error: `No hay jornadas en la temporada activa (${seasonName}).` },
+          { status: 400 }
+        );
+      }
+      targetJornadaId = latestJornada.id;
+    }
+
+    const { data: jTarget } = await supabase
+      .from("jornadas")
+      .select("number")
+      .eq("id", targetJornadaId)
+      .maybeSingle();
+    const targetNumber = jTarget?.number;
+    if (targetNumber == null) {
+      return NextResponse.json({ error: "No se pudo leer el número de la jornada." }, { status: 400 });
+    }
+
+    const { block, hint } = pickResultsBlock(parsedAll, targetNumber);
+    if (!block?.result_1x2 || block.result_1x2.length === 0) {
       return NextResponse.json(
-        { error: "No hay ninguna jornada. Crea una primero." },
-        { status: 400 }
+        {
+          error: `No se encontraron signos 1X2 en la web para la jornada ${targetNumber}.`,
+          hint:
+            "Comprueba que la jornada esté publicada, que la página no sea solo JS, o introduce resultados a mano.",
+          jornadas_en_web: parsedAll.map((p) => p.number),
+        },
+        { status: 422 }
       );
     }
+
+    const result1x2 = block.result_1x2;
+    const incomplete14 =
+      result1x2.length < 14
+        ? `Solo ${result1x2.length}/14 signos en la web para la jornada ${targetNumber}; completa el resto manualmente.`
+        : null;
+    const pleno15 = block.pleno_15;
 
     const { data: matches } = await supabase
       .from("quiniela_matches")
       .select("id, match_order")
-      .eq("jornada_id", latestJornada.id)
+      .eq("jornada_id", targetJornadaId)
       .order("match_order", { ascending: true });
 
     if (!matches || matches.length !== 15) {
@@ -116,31 +192,40 @@ export async function POST() {
       );
     }
 
+    const byOrder = new Map(matches.map((m) => [m.match_order, m]));
+
     let updated = 0;
-    for (let i = 0; i < 15; i++) {
-      const m = matches[i];
-      if (i < 14 && result1x2?.[i]) {
-        const { error } = await supabase
-          .from("quiniela_matches")
-          .update({ result_1x2: result1x2[i] })
-          .eq("id", m.id);
-        if (!error) updated++;
-      } else if (i === 14 && pleno15) {
-        const { error } = await supabase
-          .from("quiniela_matches")
-          .update({
-            result_home: pleno15.home,
-            result_away: pleno15.away,
-          })
-          .eq("id", m.id);
-        if (!error) updated++;
-      }
+    for (let ord = 1; ord <= 14; ord++) {
+      const m = byOrder.get(ord);
+      const sign = result1x2[ord - 1];
+      if (!m || !sign) continue;
+      const { error } = await supabase
+        .from("quiniela_matches")
+        .update({ result_1x2: sign })
+        .eq("id", m.id);
+      if (!error) updated++;
+    }
+    const m15 = byOrder.get(15);
+    if (m15 && pleno15) {
+      const { error } = await supabase
+        .from("quiniela_matches")
+        .update({
+          result_home: pleno15.home,
+          result_away: pleno15.away,
+        })
+        .eq("id", m15.id);
+      if (!error) updated++;
     }
 
+    const note = [hint, incomplete14].filter(Boolean).join(" ");
     return NextResponse.json({
       ok: true,
-      message: `Resultados actualizados: ${updated} partidos. Si la web no devolvió datos completos, completa el resto manualmente.`,
+      message: `Jornada ${targetNumber} (${seasonName}): ${updated} campos actualizados.${note ? " " + note : ""}`,
       updated,
+      jornada_id: targetJornadaId,
+      jornada_number: targetNumber,
+      hint: note || null,
+      pleno_aplicado: pleno15 != null,
     });
   } catch (err) {
     console.error(err);

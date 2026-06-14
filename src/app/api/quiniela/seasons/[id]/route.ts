@@ -1,6 +1,60 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+/** PATCH: actualizar temporada (p. ej. coste por jornada) */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { data: dbUser } = await supabase.from("users").select("role").eq("id", user.id).single();
+  const role = (dbUser?.role as "user" | "admin" | "superadmin") ?? "user";
+  if (role !== "admin" && role !== "superadmin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const resolvedParams = await Promise.resolve(params);
+  const seasonId = resolvedParams.id;
+
+  try {
+    const body = await request.json();
+    const updates: { cost_per_jornada?: number } = {};
+
+    if (body.cost_per_jornada != null) {
+      const cost = Number(body.cost_per_jornada);
+      if (Number.isNaN(cost) || cost < 0) {
+        return NextResponse.json({ error: "Coste por jornada inválido." }, { status: 400 });
+      }
+      updates.cost_per_jornada = cost;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "Nada que actualizar." }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from("seasons")
+      .update(updates)
+      .eq("id", seasonId)
+      .select("id, name, cost_per_jornada")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, season: data });
+  } catch (err) {
+    console.error("Error updating season:", err);
+    return NextResponse.json({ error: "Error al actualizar la temporada." }, { status: 500 });
+  }
+}
+
 /** DELETE: eliminar temporada */
 export async function DELETE(
   request: Request,

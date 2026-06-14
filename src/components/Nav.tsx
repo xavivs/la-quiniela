@@ -43,6 +43,13 @@ export default function Nav() {
         Ranking
       </Link>
       <Link
+        href="/temporadas"
+        className="text-slate-700 hover:text-slate-900 md:py-0"
+        onClick={() => setMenuOpen(false)}
+      >
+        Temporadas
+      </Link>
+      <Link
         href="/stats"
         className="text-slate-700 hover:text-slate-900 md:py-0"
         onClick={() => setMenuOpen(false)}
@@ -131,7 +138,14 @@ export default function Nav() {
             >
               Ranking
             </Link>
-              <Link
+            <Link
+              href="/temporadas"
+              className="min-h-[48px] flex items-center rounded-lg px-4 text-slate-700 hover:bg-slate-100"
+              onClick={() => setMenuOpen(false)}
+            >
+              Temporadas
+            </Link>
+            <Link
               href="/stats"
               className="min-h-[48px] flex items-center rounded-lg px-4 text-slate-700 hover:bg-slate-100"
               onClick={() => setMenuOpen(false)}

@@ -6,6 +6,9 @@ import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
 import { isCorrect } from "@/lib/quiniela-scoring";
 import type { QuinielaMatch, QuinielaPrediction, User } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /** Índice determinista en [0, length) a partir de un seed (para desempate pleno 15). */
 function seededIndex(length: number, seed: string): number {
   let h = 0;

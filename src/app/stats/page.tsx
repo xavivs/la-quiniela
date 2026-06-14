@@ -6,6 +6,9 @@ import { getPrizesBySeason } from "@/lib/quiniela-prizes";
 import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
 import StatsClient from "./StatsClient";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function StatsPage() {
   const supabase = await createClient();
   const {

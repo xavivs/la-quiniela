@@ -67,6 +67,7 @@ export type Season = {
   is_active: boolean;
   created_at?: string;
   archived_at?: string | null;
+  cost_per_jornada?: number | null;
 };
 
 export type QuinielaPrize = {

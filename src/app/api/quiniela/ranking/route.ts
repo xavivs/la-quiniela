@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getSeasonRankingBySeason } from "@/lib/quiniela-ranking";
+import { getPrizesBySeason } from "@/lib/quiniela-prizes";
 
-/** GET: obtener ranking de una temporada específica */
+/** GET: ranking de una temporada (+ premios totales por usuario) */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const season = searchParams.get("season");
@@ -12,8 +12,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const ranking = await getSeasonRankingBySeason(season);
-    return NextResponse.json({ ranking });
+    const [ranking, prizesByUser] = await Promise.all([
+      getSeasonRankingBySeason(season),
+      getPrizesBySeason(season),
+    ]);
+    return NextResponse.json({ ranking, prizesByUser });
   } catch (err) {
     console.error("Error getting ranking:", err);
     return NextResponse.json(
