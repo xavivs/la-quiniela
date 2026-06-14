@@ -316,20 +316,15 @@ export default function ManageSeasons() {
 
 function SeasonRankingList({ seasonName }: { seasonName: string }) {
   const [ranking, setRanking] = useState<any[]>([]);
-  const [prizesByUser, setPrizesByUser] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(
-          `/api/quiniela/ranking-live?season=${encodeURIComponent(seasonName)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`/api/quiniela/ranking?season=${encodeURIComponent(seasonName)}`);
         const data = await res.json();
         if (res.ok) {
           setRanking(data.ranking ?? []);
-          setPrizesByUser(data.prizesByUser ?? {});
         }
       } catch {
         // Ignorar errores
@@ -342,62 +337,41 @@ function SeasonRankingList({ seasonName }: { seasonName: string }) {
   if (loading) return <p className="text-slate-600">Cargando ranking...</p>;
   if (ranking.length === 0) return <p className="text-slate-500">No hay datos de ranking para esta temporada.</p>;
 
-  const totalEuros = Object.values(prizesByUser).reduce((a, b) => a + b, 0);
-
   return (
-    <div className="space-y-3">
-      {totalEuros > 0 && (
-        <p className="text-sm font-medium text-green-800">
-          Total premios temporada: {totalEuros.toFixed(2)} €
-        </p>
-      )}
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">#</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Nombre</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Puntos</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Premios (€)</th>
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <table className="w-full">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">#</th>
+            <th className="px-4 py-3 text-left text-sm font-medium text-slate-700">Nombre</th>
+            <th className="px-4 py-3 text-right text-sm font-medium text-slate-700">Puntos</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200">
+          {ranking.map((entry, i) => (
+            <tr key={entry.user_id || entry.quiniela_name} className="hover:bg-slate-50">
+              <td className="px-4 py-3 text-slate-600">{i + 1}</td>
+              <td className="px-4 py-3 font-medium text-slate-800">{entry.quiniela_name}</td>
+              <td className="px-4 py-3 text-right font-medium text-slate-800">{entry.total_points}</td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {ranking.map((entry, i) => {
-              const euros = prizesByUser[entry.quiniela_name] ?? 0;
-              return (
-                <tr key={entry.user_id || entry.quiniela_name} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-600">{i + 1}</td>
-                  <td className="px-4 py-3 font-medium text-slate-800">{entry.quiniela_name}</td>
-                  <td className="px-4 py-3 text-right font-medium text-slate-800">{entry.total_points}</td>
-                  <td className="px-4 py-3 text-right font-medium text-green-700">
-                    {euros > 0 ? `${euros.toFixed(2)} €` : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
   const [history, setHistory] = useState<any[]>([]);
-  const [prizesPerJornada, setPrizesPerJornada] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(
-          `/api/quiniela/ranking-live?season=${encodeURIComponent(seasonName)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`/api/quiniela/points-history?season=${encodeURIComponent(seasonName)}`);
         const data = await res.json();
         if (res.ok) {
           setHistory(data.history ?? []);
-          setPrizesPerJornada(data.prizesPerJornada ?? {});
         }
       } catch {
         // Ignorar errores
@@ -411,13 +385,8 @@ function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
   if (history.length === 0)
     return <p className="text-slate-500">No hay datos de puntos por jornada para esta temporada.</p>;
 
-  const historyLatestFirst = [...history].sort((a, b) => b.jornada_number - a.jornada_number);
-
   return (
     <div className="overflow-x-auto">
-      <p className="mb-2 text-xs text-slate-500">
-        💰 = premio cobrado esa jornada (guardado en la base de datos).
-      </p>
       <div className="inline-block min-w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50">
@@ -431,32 +400,16 @@ function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {historyLatestFirst.map((h) => {
-              const jornadaPrizes = prizesPerJornada[h.jornada_id] ?? {};
-              return (
-                <tr key={h.jornada_id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2 font-medium text-slate-800">Jornada {h.jornada_number}</td>
-                  {QUINIELA_NAMES.map((name) => {
-                    const pts = h.points_by_user[name];
-                    const cobro = jornadaPrizes[name];
-                    const hasCobro = cobro != null && cobro > 0;
-                    return (
-                      <td
-                        key={name}
-                        className={`px-3 py-2 text-center text-slate-700 ${hasCobro ? "bg-green-50 font-medium" : ""}`}
-                      >
-                        {pts ?? "-"}
-                        {hasCobro && (
-                          <span className="ml-1 text-green-700" title={`Cobró ${cobro.toFixed(2)} €`}>
-                            💰
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+            {history.map((h) => (
+              <tr key={h.jornada_id} className="hover:bg-slate-50">
+                <td className="px-3 py-2 font-medium text-slate-800">Jornada {h.jornada_number}</td>
+                {QUINIELA_NAMES.map((name) => (
+                  <td key={name} className="px-3 py-2 text-center text-slate-700">
+                    {h.points_by_user[name] ?? "-"}
+                  </td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

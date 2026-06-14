@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
 import type { RankingEntry } from "@/lib/types";
 
@@ -35,52 +35,14 @@ export default function RankingClient({
   prizesPerJornada,
 }: Props) {
   const [viewMode, setViewMode] = useState<"points" | "euros">("points");
-  const [refreshing, setRefreshing] = useState(false);
-
-  const [liveEntries, setLiveEntries] = useState(entries);
-  const [liveHistory, setLiveHistory] = useState(history);
-  const [livePrizesByUser, setLivePrizesByUser] = useState(prizesByUser);
-  const [livePrizesPerJornada, setLivePrizesPerJornada] = useState(prizesPerJornada);
-
-  useEffect(() => {
-    setLiveEntries(entries);
-    setLiveHistory(history);
-    setLivePrizesByUser(prizesByUser);
-    setLivePrizesPerJornada(prizesPerJornada);
-  }, [entries, history, prizesByUser, prizesPerJornada]);
-
-  const fetchLive = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const res = await fetch(
-        `/api/quiniela/ranking-live?season=${encodeURIComponent(currentSeasonName)}`,
-        { credentials: "same-origin", cache: "no-store" }
-      );
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        ranking?: RankingEntry[];
-        history?: Props["history"];
-        prizesByUser?: Record<string, number>;
-        prizesPerJornada?: Record<string, Record<string, number>>;
-      };
-      if (data.ranking) setLiveEntries(data.ranking);
-      if (data.history) setLiveHistory(data.history);
-      if (data.prizesByUser) setLivePrizesByUser(data.prizesByUser);
-      if (data.prizesPerJornada) setLivePrizesPerJornada(data.prizesPerJornada);
-    } catch {
-      /* red o sesión: mantener último estado */
-    } finally {
-      setRefreshing(false);
-    }
-  }, [currentSeasonName]);
 
   const entriesWithPrizes = useMemo(
     () =>
-      liveEntries.map((e) => ({
+      entries.map((e) => ({
         ...e,
-        total_prizes: livePrizesByUser[e.quiniela_name] ?? 0,
+        total_prizes: prizesByUser[e.quiniela_name] ?? 0,
       })),
-    [liveEntries, livePrizesByUser]
+    [entries, prizesByUser]
   );
 
   const sortedByPoints = useMemo(
@@ -104,8 +66,8 @@ export default function RankingClient({
 
   const displayList = viewMode === "points" ? sortedByPoints : sortedByEuros;
   const historyLatestFirst = useMemo(
-    () => [...liveHistory].sort((a, b) => b.jornada_number - a.jornada_number),
-    [liveHistory]
+    () => [...history].sort((a, b) => b.jornada_number - a.jornada_number),
+    [history]
   );
   const rankByKey = useMemo(
     () =>
@@ -123,15 +85,6 @@ export default function RankingClient({
         </p>
         <div className="flex items-center gap-2 max-md:justify-end">
           <span className="text-sm text-slate-600 max-md:sr-only">Ver:</span>
-          <button
-            type="button"
-            onClick={() => void fetchLive()}
-            disabled={refreshing}
-            className="rounded bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-60"
-            title="Recargar datos desde base de datos"
-          >
-            {refreshing ? "Actualizando..." : "Actualizar"}
-          </button>
           <button
             onClick={() => setViewMode("points")}
             className={`rounded px-3 py-1 text-sm font-medium transition-colors max-md:min-h-[44px] max-md:flex-1 ${
@@ -211,7 +164,7 @@ export default function RankingClient({
         </table>
       </div>
 
-      {liveHistory.length > 0 && (
+      {history.length > 0 && (
         <div className="mt-10 max-md:mt-6">
           <h2 className="mb-4 text-xl font-semibold text-slate-800 max-md:text-lg">
             Historial de puntos por jornada
@@ -234,7 +187,7 @@ export default function RankingClient({
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {historyLatestFirst.map((h) => {
-                    const jornadaPrizes = livePrizesPerJornada[h.jornada_id] ?? {};
+                    const jornadaPrizes = prizesPerJornada[h.jornada_id] ?? {};
                     return (
                       <tr key={h.jornada_id} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-800">
