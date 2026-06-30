@@ -404,7 +404,7 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
               <p className="text-sm text-slate-600">
                 Los cambios no se guardan solos. Pulsa &quot;Guardar equipos&quot; para aplicarlos.
               </p>
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-start gap-2">
               <button
                 type="button"
                 disabled={savingTeams}
