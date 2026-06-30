@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { OPTIONS_1X2, OPTIONS_PLENO } from "@/lib/quiniela-constants";
 import type { Jornada } from "@/lib/types";
 import type { QuinielaMatch } from "@/lib/types";
@@ -30,6 +30,16 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
   const [deleting, setDeleting] = useState(false);
   const [votingOpen, setVotingOpen] = useState(jornada.voting_open !== false);
   const [togglingVoting, setTogglingVoting] = useState(false);
+  const [savingTeams, setSavingTeams] = useState(false);
+  const [editingTeams, setEditingTeams] = useState(false);
+
+  const [teamState, setTeamState] = useState<Record<string, { home_team: string; away_team: string }>>(() => {
+    const init: Record<string, { home_team: string; away_team: string }> = {};
+    for (const m of matches) {
+      init[m.id] = { home_team: m.home_team, away_team: m.away_team };
+    }
+    return init;
+  });
 
   const [resultState, setResultState] = useState<Record<string, ResultState>>(() => {
     const init: Record<string, ResultState> = {};
@@ -88,6 +98,45 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.error || "Error al subir resultados.");
+      return;
+    }
+    window.location.reload();
+  }
+
+  function resetTeamEdits() {
+    const init: Record<string, { home_team: string; away_team: string }> = {};
+    for (const m of matches) {
+      init[m.id] = { home_team: m.home_team, away_team: m.away_team };
+    }
+    setTeamState(init);
+    setEditingTeams(false);
+  }
+
+  useEffect(() => {
+    if (!expanded) resetTeamEdits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al colapsar la jornada
+  }, [expanded]);
+
+  function cancelEditingTeams() {
+    resetTeamEdits();
+  }
+
+  async function submitTeams() {
+    const list = matches.map((m) => ({
+      id: m.id,
+      home_team: teamState[m.id]?.home_team ?? m.home_team,
+      away_team: teamState[m.id]?.away_team ?? m.away_team,
+    }));
+    setSavingTeams(true);
+    const res = await fetch("/api/quiniela/matches", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matches: list }),
+    });
+    setSavingTeams(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al guardar los equipos.");
       return;
     }
     window.location.reload();
@@ -211,7 +260,25 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th className="py-2 pr-2">#</th>
-                <th className="py-2 pr-2">Partido</th>
+                <th className="py-2 pr-2">
+                  <div className="flex items-center gap-2">
+                    <span>Partido</span>
+                    {!isHistorical && !editingTeams && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingTeams(true)}
+                        title="Editar nombres de equipos"
+                        className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800"
+                        aria-label="Editar equipos"
+                      >
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </th>
                 <th className="py-2">Resultado</th>
               </tr>
             </thead>
@@ -224,8 +291,40 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
                   className={thickBorder ? "border-b-2 border-slate-300" : "border-b border-slate-100"}
                 >
                   <td className="py-2 pr-2 text-slate-500">{m.match_order}</td>
-                  <td className="py-2 pr-2 font-medium text-slate-800">
-                    {m.home_team} – {m.away_team}
+                  <td className="py-2 pr-2">
+                    {isHistorical || !editingTeams ? (
+                      <span className="font-medium text-slate-800">
+                        {teamState[m.id]?.home_team ?? m.home_team} – {teamState[m.id]?.away_team ?? m.away_team}
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                        <input
+                          type="text"
+                          value={teamState[m.id]?.home_team ?? ""}
+                          onChange={(e) =>
+                            setTeamState((prev) => ({
+                              ...prev,
+                              [m.id]: { ...prev[m.id], home_team: e.target.value },
+                            }))
+                          }
+                          className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:max-w-[140px]"
+                          placeholder="Local"
+                        />
+                        <span className="hidden text-slate-400 sm:inline">–</span>
+                        <input
+                          type="text"
+                          value={teamState[m.id]?.away_team ?? ""}
+                          onChange={(e) =>
+                            setTeamState((prev) => ({
+                              ...prev,
+                              [m.id]: { ...prev[m.id], away_team: e.target.value },
+                            }))
+                          }
+                          className="w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm sm:max-w-[140px]"
+                          placeholder="Visitante"
+                        />
+                      </div>
+                    )}
                   </td>
                   <td className="py-2 text-left">
                     {isHistorical ? (
@@ -299,6 +398,32 @@ export default function JornadaRow({ jornada, matches, isLatestJornada = false, 
           )}
           
           <PrizeManager jornadaId={jornada.id} />
+
+          {!isHistorical && editingTeams && (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm text-slate-600">
+                Los cambios no se guardan solos. Pulsa &quot;Guardar equipos&quot; para aplicarlos.
+              </p>
+              <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={savingTeams}
+                onClick={cancelEditingTeams}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={savingTeams}
+                onClick={submitTeams}
+                className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+              >
+                {savingTeams ? "Guardando…" : "Guardar equipos"}
+              </button>
+              </div>
+            </div>
+          )}
           
           <div className="mt-4 flex items-center justify-between gap-4">
             <button

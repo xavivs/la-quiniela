@@ -47,6 +47,9 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   FCLAHTI: "FC LAHTI",
   FCLANTI: "FC LAHTI",
   IFGNISTAN: "IF GNISTAN",
+  "1F.GNISTAN": "IF GNISTAN",
+  "1FGNISTAN": "IF GNISTAN",
+  "1F GNISTAN": "IF GNISTAN",
   IFKMARIEHANN: "IFK MARIEHAMN",
   IFKMARIENAMN: "IFK MARIEHAMN",
   MIALLBY: "MJALLBY",
@@ -63,6 +66,9 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   "AT MADRID": "AT.MADRID",
   "R MADRID": "R.MADRID",
   SK: "SJK",
+  MK: "SJK",
+  TIPS: "TPS",
+  TIP: "TPS",
   FFJARO: "FF JARO",
   ALMADRID: "AT.MADRID",
   BENS: "BETIS",
@@ -85,7 +91,11 @@ const OCR_TEAM_FIXES: Record<string, string> = {
 };
 
 function applyOcrTeamFixes(name: string): string {
-  const upper = name.toUpperCase().replace(/\s+/g, " ").trim();
+  let upper = name.toUpperCase().replace(/\s+/g, " ").trim();
+  // OCR: "1" leído por "I" al inicio (1F.GNISTAN → IF GNISTAN, 1FK → IFK)
+  upper = upper.replace(/^1F\./g, "IF ");
+  upper = upper.replace(/^1F\s+/g, "IF ");
+  upper = upper.replace(/^1FK/g, "IFK");
   if (OCR_TEAM_FIXES[upper]) return OCR_TEAM_FIXES[upper];
   // Normalizar espacios en nombres compuestos mal cortados
   const compact = upper.replace(/\s+/g, "");
@@ -129,6 +139,16 @@ function mergeAbbrevTokens(tokens: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i].trim();
+    if (/^1F$/i.test(t) && i + 1 < tokens.length) {
+      out.push(`IF ${tokens[i + 1]}`);
+      i++;
+      continue;
+    }
+    if (/^(IF|1F)$/i.test(t) && i + 1 < tokens.length && /^GNISTAN$/i.test(tokens[i + 1])) {
+      out.push("IF GNISTAN");
+      i++;
+      continue;
+    }
     if (/^(R|AT|ATH)$/i.test(t) && i + 1 < tokens.length) {
       const next = tokens[i + 1].trim();
       if (/^[A-ZÁÉÍÓÚÑ]/i.test(next)) {
@@ -876,10 +896,17 @@ function tryAddPleno15(normalized: string, matches: ParsedMatch[], seen: Set<str
 }
 
 function applyCleanOcrToMatches(matches: ParsedMatch[]): ParsedMatch[] {
-  return matches.map(({ home_team, away_team }) => ({
-    home_team: cleanOcrTeamName(home_team),
-    away_team: cleanOcrTeamName(away_team),
-  }));
+  return matches.map(({ home_team, away_team }) => {
+    let home = cleanOcrTeamName(applyOcrTeamFixes(home_team));
+    let away = cleanOcrTeamName(applyOcrTeamFixes(away_team));
+    const h = home.toUpperCase();
+    const a = away.toUpperCase();
+    if ((h === "MK" || h === "SIK" || h === "SK") && (a === "TIPS" || a === "TPS" || a === "TIP")) {
+      home = "SJK";
+      away = "TPS";
+    }
+    return { home_team: home, away_team: away };
+  });
 }
 
 /**
