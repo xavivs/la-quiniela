@@ -9,7 +9,9 @@ export type ParsedPleno = { home: "0" | "1" | "2" | "M"; away: "0" | "1" | "2" |
 /** Normalize for OCR and web: dashes, spaces, tabs */
 function normalizeDashes(s: string): string {
   return s
-    .replace(/\u2013/g, "-") // en dash to hyphen
+    .replace(/\bR-SOCIEDAD\b/gi, "R.SOCIEDAD")
+    .replace(/\bR-OVIEDO\b/gi, "R.OVIEDO")
+    .replace(/\u2013/g, "-")
     .replace(/\u2014/g, "-") // em dash to hyphen
     .replace(/&ndash;|&#8211;|&#x2013;/gi, "-")
     // Normalize all dashes to " - " (with spaces): handles "RAYO-OSASUNA", "RAYO -OSASUNA", "RAYO- OSASUNA", "RAYO - OSASUNA"
@@ -38,15 +40,220 @@ function ocrCleanWord(w: string): string {
   return w.replace(/\|/g, "I").trim();
 }
 
+/** Correcciones frecuentes en nombres cortos mal leídos por OCR en boletines. */
+const OCR_TEAM_FIXES: Record<string, string> = {
+  SIK: "SJK",
+  FEJARO: "FF JARO",
+  FCLAHTI: "FC LAHTI",
+  FCLANTI: "FC LAHTI",
+  IFGNISTAN: "IF GNISTAN",
+  IFKMARIEHANN: "IFK MARIEHAMN",
+  IFKMARIENAMN: "IFK MARIEHAMN",
+  MIALLBY: "MJALLBY",
+  VES: "VPS",
+  ORGRVTE: "ORGRYTE",
+  GOTEBORG: "GOTEBORG",
+  OTERORG: "GOTEBORG",
+  KAIMAR: "KALMAR",
+  "KAI MAR": "KALMAR",
+  DEGERFEORS: "DEGERFORS",
+  "MAI MO": "MALMO",
+  ATMADRID: "AT.MADRID",
+  RMADRID: "R.MADRID",
+  "AT MADRID": "AT.MADRID",
+  "R MADRID": "R.MADRID",
+  SK: "SJK",
+  FFJARO: "FF JARO",
+  ALMADRID: "AT.MADRID",
+  BENS: "BETIS",
+  ALAVESA: "ALAVÉS",
+  RIOVIEDO: "R.OVIEDO",
+  "R- SOCIEDAD": "R.SOCIEDAD",
+  RSOCIEDAD: "R.SOCIEDAD",
+  "R SOCIEDAD": "R.SOCIEDAD",
+  RZARAGOZA: "R. ZARAGOZA",
+  ANDORRAEC: "ANDORRA FC",
+  "ANDORRA EC": "ANDORRA FC",
+  ElIBAR: "EIBAR",
+  IHK: "IFK",
+  ALK: "AIK",
+  "R.IOVIEDO": "R.OVIEDO",
+  "R-SOCIEDAD": "R.SOCIEDAD",
+  ELFSBORG: "ELFSBORG",
+  HAMMARBY: "HAMMARBY",
+  BARCELONA: "BARCELONA",
+};
+
+function applyOcrTeamFixes(name: string): string {
+  const upper = name.toUpperCase().replace(/\s+/g, " ").trim();
+  if (OCR_TEAM_FIXES[upper]) return OCR_TEAM_FIXES[upper];
+  // Normalizar espacios en nombres compuestos mal cortados
+  const compact = upper.replace(/\s+/g, "");
+  return OCR_TEAM_FIXES[compact] ?? name;
+}
+
+/** Equipos con abreviatura tipo R.OVIEDO, ATH.CLUB, AT.MADRID… */
+const DOT_ABBREV_TEAMS = new Set([
+  "R.OVIEDO", "R.MADRID", "AT.MADRID", "ATH.CLUB", "R.SOCIEDAD", "RACINGS", "C. LEONESA",
+]);
+
+function isLikelyTeamAbbrev(s: string): boolean {
+  const t = s.toUpperCase().trim();
+  if (DOT_ABBREV_TEAMS.has(t)) return true;
+  if (/^(R\.|AT\.|ATH\.)[A-Z.]+$/.test(t)) return true;
+  if (/^[A-Z]{2,}\.[A-Z]{2,}$/.test(t)) return true;
+  if (/^C\.\s?[A-Z]{2,}/.test(t)) return true;
+  return false;
+}
+
+function stripRowOcrTail(s: string): string {
+  return s
+    .replace(/\.{2,}.*$/, "")
+    .replace(/\s+\d+[\s:]\d{2}.*$/, "")
+    .replace(/\s+\d{1,2}\s*$/, "")
+    .replace(/\s+(ss|os|e{2,})\s*$/i, "")
+    .replace(/\s+[AEH]\s*$/i, "")
+    .replace(/\s+AZ\s*$/i, "")
+    .replace(/\s*[:'"\\|]+\s*$/g, "")
+    .trim();
+}
+
+function extractPlenoTeamLine(line: string): string {
+  let t = stripRowOcrTail(stripMatchPrefix(line));
+  t = t.replace(/\s+op\s*\d.*$/i, "").replace(/\s+\d+.*$/, "").trim();
+  t = t.replace(/,.*$/, "").replace(/\.+$/, "").trim();
+  return cleanOcrTeamName(applyOcrTeamFixes(ocrCleanWord(t)));
+}
+
+function mergeAbbrevTokens(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i].trim();
+    if (/^(R|AT|ATH)$/i.test(t) && i + 1 < tokens.length) {
+      const next = tokens[i + 1].trim();
+      if (/^[A-ZÁÉÍÓÚÑ]/i.test(next)) {
+        out.push(`${t.toUpperCase()}.${next}`);
+        i++;
+        continue;
+      }
+    }
+    out.push(t);
+  }
+  return out;
+}
+
+/** Parse pleno al 15 from a tall crop (two team lines). */
+export function parsePleno15Ocr(text: string): ParsedMatch | null {
+  const oneLine = stripRowOcrTail(normalizeDashes(text.replace(/\r?\n/g, " ")));
+  const wordChunks = oneLine
+    .replace(/\d{1,2}:\d{2}.*/g, "")
+    .replace(/\d+.*/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length >= 1 && /^[A-ZÁÉÍÓÚÑ0-9]/i.test(w));
+  const mergedWords = mergeAbbrevTokens(wordChunks).filter((w) => w.length >= 2);
+  if (mergedWords.length >= 2) {
+    const home = extractPlenoTeamLine(mergedWords[0]);
+    const away = extractPlenoTeamLine(mergedWords[mergedWords.length - 1]);
+    if (home.length >= 2 && away.length >= 2 && !isHeaderNoise(home) && !isHeaderNoise(away)) {
+      return { home_team: home, away_team: away };
+    }
+  }
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 1 && !/^[\d"'\\|_\s.]+$/.test(l) && !/^\d{1,2}:\d{2}/.test(l));
+
+  const teams = lines
+    .map(extractPlenoTeamLine)
+    .filter((t) => t.length >= 2 && !isHeaderNoise(t) && !/^[0-2M\s]+$/i.test(t));
+
+  if (teams.length >= 2) {
+    return { home_team: teams[0], away_team: teams[teams.length - 1] };
+  }
+
+  let teamTokens = oneLine.match(/\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.]{1,}(?:\s+[A-ZÁÉÍÓÚÑ.][A-ZÁÉÍÓÚÑa-záéíóúñ.]+)*)\b/g);
+  if (teamTokens) {
+    teamTokens = mergeAbbrevTokens(teamTokens);
+    if (teamTokens.length >= 2) {
+      const home = extractPlenoTeamLine(teamTokens[0]);
+      const away = extractPlenoTeamLine(teamTokens[teamTokens.length - 1]);
+      if (home.length >= 2 && away.length >= 2) return { home_team: home, away_team: away };
+    }
+  }
+
+  // Una sola línea con dos palabras en mayúsculas
+  const pair = oneLine.match(/\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.]{1,})\b.*\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.]{2,})\b/);
+  if (pair) {
+    const home = extractPlenoTeamLine(pair[1]);
+    const away = extractPlenoTeamLine(pair[2]);
+    if (home.length >= 2 && away.length >= 2) return { home_team: home, away_team: away };
+  }
+  return null;
+}
+
+/**
+ * Parse a single OCR row (one match line). Used with per-row image crops.
+ */
+export function parseMatchRowOcr(text: string): ParsedMatch | null {
+  let line = text.trim();
+  if (!line) return null;
+
+  line = normalizeDashes(line);
+  line = stripRowOcrTail(line);
+  line = stripMatchPrefix(line);
+  if (!line) return null;
+
+  const dashIdx = line.search(/\s-\s/);
+  if (dashIdx === -1) {
+    const two = line.match(/^([A-Z][A-Za-zÀ-ÿ0-9.]{1,})\s+([A-Z][A-Za-zÀ-ÿ0-9.]{1,})/);
+    if (!two) return null;
+    let home = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(two[1])));
+    let away = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(two[2])));
+    if (home.length < 2 || away.length < 2) return null;
+    return { home_team: home, away_team: away };
+  }
+
+  let home = line.slice(0, dashIdx).trim();
+  let away = line.slice(dashIdx + 3).trim();
+  home = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(home)));
+  away = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(away)));
+  if (home.length < 2 || away.length < 2 || isHeaderNoise(home) || isHeaderNoise(away)) return null;
+  return { home_team: home, away_team: away };
+}
+
+/**
+ * Build 15 matches from per-row OCR strings (index 0 = partido 1).
+ * For pleno 15, tries two-line split if a single row has no dash pair.
+ */
+export function parseMatchesFromRowTexts(rowTexts: string[]): ParsedMatch[] {
+  const slots: ParsedMatch[] = Array.from({ length: 15 }, () => ({ home_team: "", away_team: "" }));
+
+  for (let i = 0; i < Math.min(rowTexts.length, 15); i++) {
+    const raw = rowTexts[i]?.trim() ?? "";
+    if (!raw) continue;
+
+    let parsed = parseMatchRowOcr(raw);
+
+    // Pleno al 15: recorte alto con dos líneas de equipos
+    if (i === 14) {
+      parsed = parsePleno15Ocr(raw) ?? parsed;
+    }
+
+    if (parsed) slots[i] = parsed;
+  }
+
+  return applyCleanOcrToMatches(slots);
+}
+
 /** Reject if string looks like header/UI text (DIA/HORA, 1X2, JORNADA, etc.). No rechazar si es un nombre largo que solo contiene "bóm" o "MEX" (ej. "bóm MÁLAGA"). */
 function isHeaderNoise(s: string): boolean {
   const t = s.toUpperCase().trim();
   if (t.length < 2) return true;
 
   // Allowlist: equipos reales que con OCR aparecen en mayúsculas con punto.
-  // Esta heurística es para evitar que se clasifiquen como "ruido" en pleno 15.
-  const allowedDotTeams = new Set(["R.MADRID", "AT.MADRID", "R.OVIEDO", "ATH.CLUB", "R.SOCIEDAD", "RACINGS"]);
-  if (allowedDotTeams.has(t)) return false;
+  const allowedDotTeams = DOT_ABBREV_TEAMS;
+  if (allowedDotTeams.has(t) || isLikelyTeamAbbrev(t)) return false;
   
   // Reject strings that are mostly dots or have many consecutive dots (e.g., "e.e.e", "..........")
   // But allow valid team names with a single dot like R.OVIEDO, ATH.CLUB, R.SOCIEDAD
@@ -55,12 +262,15 @@ function isHeaderNoise(s: string): boolean {
   if (dotMatches && dotMatches.length >= 3) return true; // 3+ dots total
   if (t.match(/\.{2,}/)) return true; // 2+ consecutive dots
   
-  // Reject patterns like "E.E", "E.E.E", "E.NNNNN" (OCR noise from dots)
-  if (/^[A-Z]\.[A-Z](\.[A-Z])*$/i.test(t) && t.length < 10) return true;
-  if (/^[A-Z]\.[A-Z]{3,}$/i.test(t) && t.length < 10) return true;
+  // Reject patterns like "E.E", "E.E.E" (OCR noise) — pero no abreviaturas reales
+  if (!isLikelyTeamAbbrev(t)) {
+    if (/^[A-Z]\.[A-Z](\.[A-Z])*$/i.test(t) && t.length < 10) return true;
+    if (/^[A-Z]\.[A-Z]{3,}$/i.test(t) && t.length < 10) return true;
+  }
   
   const strongNoise = ["PRONÓSTICO", "QUINIELA", "JORNADA", "DIA/HORA", "DIA HORA", "1X2", "VIERNES", "SABADO", "DOMINGO", "LUNES", "BOTE", "CIERRE", "PART."];
   if (strongNoise.some((n) => t.includes(n))) return true;
+  if (/\bPART\b/.test(t)) return true;
   if (/\d{1,2}:\d{2}\s*(VIE|SAB|DOM|LUN)/i.test(t) || /^\d\s*[Xx]\s*\d$/i.test(t)) return true;
   if (t === "PART" || t === "1X2") return true;
   const shortNoise = ["MEX", "BOM", "TPXI", "DMETIX", "SABE", "DMPOITI", "MO OF", "EEE", "E.NNNNN"];
@@ -85,7 +295,7 @@ function cleanOcrTeamName(s: string): string {
     t = t.replace(OCR_JUNK_PREFIXES, "").trim();
   }
   t = t.replace(/\s+$/g, "").replace(/^\s+/g, "").replace(/\s+/g, " ");
-  t = t.replace(/^ROVIEDO$/i, "OVIEDO").replace(/^ESPANVOL$/i, "ESPANYOL").replace(/^ESPANOL$/i, "ESPANYOL");
+  t = t.replace(/^ESPANVOL$/i, "ESPANYOL").replace(/^ESPANOL$/i, "ESPANYOL");
   return t.trim();
 }
 
@@ -97,6 +307,7 @@ function cleanOcrTeamName(s: string): string {
  */
 function trimToTeamName(s: string): string {
   let t = s.trim();
+  const preserve = isLikelyTeamAbbrev(t);
   // Normalize whitespace
   t = t.replace(/\s+/g, " ");
   
@@ -106,9 +317,13 @@ function trimToTeamName(s: string): string {
   // Stop at multiple consecutive dots (2+) - these are separators (be more aggressive)
   t = t.replace(/\s*\.{2,}.*$/, "");
   
-  // Stop at patterns like "e.e.e" or "e.nnnnn" (OCR noise)
-  t = t.replace(/[a-z]\.[a-z]{1,}\.[a-z]{1,}.*$/i, ""); // e.e.e pattern
-  t = t.replace(/[a-z]\.[a-z]{3,}.*$/i, ""); // e.nnnnn pattern
+  if (!preserve) {
+    // Stop at patterns like "e.e.e" or "e.nnnnn" (OCR noise) — solo en minúsculas
+    if (/[a-z]/.test(t)) {
+      t = t.replace(/[a-z]\.[a-z]{1,}\.[a-z]{1,}.*$/i, "");
+      t = t.replace(/[a-z]\.[a-z]{3,}.*$/i, "");
+    }
+  }
   
   // Stop at match number patterns: " 12 1", " 3 56909", " 3 SAB", " 15 5OMPOL1[2)M"
   t = t.replace(/\s+\d{1,2}\s+(\d{2,4}|[A-Za-z]{2,10}|[A-Z0-9\[\]\(\)\|]+).*$/i, "");
@@ -140,6 +355,44 @@ function trimToTeamName(s: string): string {
 }
 
 /**
+ * OCR sometimes reads only the match index without team names (e.g. "[7 E" for SJK - TPS).
+ * Returns the match number (1-14) when the line is essentially just that number plus noise.
+ */
+function detectOrphanMatchNumber(line: string): number | null {
+  const t = line.trim();
+  if (t.length > 14) return null;
+
+  // Real match lines have a dash between teams or two team-like words
+  if (/[A-Z][A-Za-zÀ-ÿ0-9.]{2,}\s*[-–—]\s*[A-Z]/.test(t)) return null;
+  if (/^[A-Z][A-Za-zÀ-ÿ0-9.]{2,}\s+[A-Z][A-Za-zÀ-ÿ0-9.]{2,}/.test(t)) return null;
+
+  const patterns = [
+    /^\[?\s*(\d{1,2})\s*[\]\[A-Za-z]{0,3}\s*$/,
+    /^[\[\]\s]*(\d{1,2})[\sA-Za-z]{0,3}$/,
+  ];
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 14) return n;
+    }
+  }
+  return null;
+}
+
+/** Insert an empty match at the 1-based slot when OCR skipped team names for that row. */
+function insertGapForMatchNumber(matches: ParsedMatch[], oneBasedNumber: number): void {
+  const idx = oneBasedNumber - 1;
+  if (matches.length > idx) return;
+  while (matches.length < idx) {
+    matches.push({ home_team: "", away_team: "" });
+  }
+  if (matches.length === idx) {
+    matches.push({ home_team: "", away_team: "" });
+  }
+}
+
+/**
  * Extract up to 15 "HOME - AWAY" pairs from text using line-based parsing.
  * Strategy: Split by lines, find "JORNADA" marker, then process each line in order.
  * Format: "Local - Visitante...." + noise + newline for matches 1-14
@@ -161,7 +414,7 @@ export function parseTeamNamesFromText(text: string): ParsedMatch[] {
   // Find where matches start (after "JORNADA X" line)
   let startIdx = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (/JORNADA\s+\d+/i.test(lines[i])) {
+    if (/JORNADA\s+(\d+|DIA)/i.test(lines[i])) {
       startIdx = i + 1;
       break;
     }
@@ -190,6 +443,13 @@ export function parseTeamNamesFromText(text: string): ParsedMatch[] {
     }
     // Only skip if entire line is header noise (not just contains it)
     if (isHeaderNoise(line) && line.length < 20) {
+      continue;
+    }
+
+    // OCR orphan: line has match number but no team names (e.g. "[7 E" instead of SJK - TPS)
+    const orphanNum = detectOrphanMatchNumber(line);
+    if (orphanNum !== null) {
+      insertGapForMatchNumber(matches, orphanNum);
       continue;
     }
     

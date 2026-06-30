@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { parseTeamNamesFromText } from "@/lib/parseQuinielaWeb";
+import { parseTeamNamesFromText, parseMatchesFromRowTexts } from "@/lib/parseQuinielaWeb";
+import { prepareQuinielaImage, canvasToBlob } from "@/lib/quinielaOcrImage";
 
 type MatchRow = {
   home_team: string;
@@ -87,36 +88,70 @@ export default function ImportJornadaForm() {
     try {
       const Tesseract = (await getTesseract()) as {
         createWorker: (lang: string, oem?: number, opts?: unknown) => Promise<{
-          setParameters: (p: Record<string, number>) => Promise<void>;
-          recognize: (img: File, opts?: unknown) => Promise<{ data: { text?: string } }>;
+          setParameters: (p: Record<string, number | string>) => Promise<void>;
+          recognize: (img: File | Blob, opts?: unknown) => Promise<{ data: { text?: string } }>;
           terminate: () => Promise<void>;
         }>;
       };
       if (!Tesseract || typeof Tesseract.createWorker !== "function") {
         throw new Error("Tesseract no está disponible correctamente");
       }
-      setOcrMessage("Analizando imagen (español)… Puede tardar unos segundos.");
-      // No pasar logger: con Tesseract desde CDN + Workers, postMessage no puede clonar funciones y da DataCloneError.
+      setOcrMessage("Preprocesando imagen…");
+      const { rows } = await prepareQuinielaImage(file);
+      setOcrMessage("Analizando filas (español)… Puede tardar unos segundos.");
       const worker = await Tesseract.createWorker("spa", 1);
       if (!worker) {
         throw new Error("No se pudo crear el worker de Tesseract");
       }
-      await worker.setParameters({ tessedit_pageseg_mode: 6 });
-      const { data } = await worker.recognize(file);
+      await worker.setParameters({ tessedit_pageseg_mode: 7 });
+      const rowTexts: string[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        setOcrMessage(`Leyendo partido ${i + 1}/15…`);
+        const blob = await canvasToBlob(rows[i].canvas);
+        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 6 });
+        const { data } = await worker.recognize(blob);
+        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 7 });
+        rowTexts.push((data?.text ?? "").trim());
+      }
       await worker.terminate();
-      const raw = (data?.text ?? "").trim();
+      const raw = rowTexts.map((t, i) => `${i + 1}: ${t}`).join("\n");
       setOcrRawText(raw || null);
-      const parsed = parseTeamNamesFromText(raw);
-      if (parsed.length > 0) {
+      const parsed = parseMatchesFromRowTexts(rowTexts);
+      const filled = parsed.filter((m) => m.home_team.trim() || m.away_team.trim()).length;
+      if (filled > 0) {
         setMatches(
           Array.from({ length: 15 }, (_, i) => ({
             home_team: parsed[i]?.home_team ?? "",
             away_team: parsed[i]?.away_team ?? "",
           }))
         );
-        setOcrMessage(`OCR: ${parsed.length} partidos detectados. Revisa la tabla.`);
+        const emptySlots = 15 - filled;
+        setOcrMessage(
+          emptySlots > 0
+            ? `OCR: ${filled} partidos detectados, ${emptySlots} fila(s) sin leer (rellena a mano). Revisa la tabla.`
+            : `OCR: ${filled} partidos detectados. Revisa la tabla.`
+        );
       } else {
-        setOcrMessage("OCR no detectó partidos (Local - Visitante). Revisa el texto leído abajo o sube otra imagen.");
+        // Fallback: OCR de página completa si el recorte por filas falla
+        setOcrMessage("Reintentando OCR de página completa…");
+        const fallbackWorker = await Tesseract.createWorker("spa", 1);
+        await fallbackWorker.setParameters({ tessedit_pageseg_mode: 6 });
+        const { data } = await fallbackWorker.recognize(file);
+        await fallbackWorker.terminate();
+        const fullRaw = (data?.text ?? "").trim();
+        setOcrRawText(fullRaw || raw || null);
+        const fallbackParsed = parseTeamNamesFromText(fullRaw);
+        if (fallbackParsed.length > 0) {
+          setMatches(
+            Array.from({ length: 15 }, (_, i) => ({
+              home_team: fallbackParsed[i]?.home_team ?? "",
+              away_team: fallbackParsed[i]?.away_team ?? "",
+            }))
+          );
+          setOcrMessage(`OCR (fallback): ${fallbackParsed.length} partidos detectados. Revisa la tabla.`);
+        } else {
+          setOcrMessage("OCR no detectó partidos. Revisa el texto leído abajo o sube otra imagen.");
+        }
       }
     } catch (err) {
       console.error("OCR Error:", err);
