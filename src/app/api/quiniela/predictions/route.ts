@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
+import { maybeCloseVotingWhenAllVoted } from "@/lib/quiniela-voting";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -28,6 +29,22 @@ export async function POST(request: Request) {
 
   const body = await request.json();
 
+  async function isVotingOpenForMatch(quinielaMatchId: string): Promise<boolean> {
+    const { data: match } = await supabase
+      .from("quiniela_matches")
+      .select("jornada_id")
+      .eq("id", quinielaMatchId)
+      .single();
+    if (!match) return false;
+    const { data: jornada } = await supabase
+      .from("jornadas")
+      .select("voting_open, is_historical")
+      .eq("id", match.jornada_id)
+      .single();
+    if (!jornada || jornada.is_historical) return false;
+    return jornada.voting_open !== false;
+  }
+
   // Batch: { predictions: [ { quiniela_match_id, predicted_1x2? }, { quiniela_match_id, predicted_home, predicted_away }, ... ] }
   if (Array.isArray(body.predictions)) {
     const list = body.predictions as Array<{
@@ -37,6 +54,13 @@ export async function POST(request: Request) {
       predicted_away?: string;
     }>;
     if (list.length === 0) return NextResponse.json({ error: "predictions array empty" }, { status: 400 });
+    const votingOpen = await isVotingOpenForMatch(list[0].quiniela_match_id);
+    if (!votingOpen) {
+      return NextResponse.json(
+        { error: "La votación está cerrada. El admin debe abrirla para poder votar." },
+        { status: 403 }
+      );
+    }
     for (const item of list) {
       if (typeof item.quiniela_match_id !== "string") {
         return NextResponse.json({ error: "quiniela_match_id required in each item" }, { status: 400 });
@@ -53,6 +77,14 @@ export async function POST(request: Request) {
         .upsert(payload, { onConflict: "user_id,quiniela_match_id" });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
+    const { data: match } = await supabase
+      .from("quiniela_matches")
+      .select("jornada_id")
+      .eq("id", list[0].quiniela_match_id)
+      .single();
+    if (match?.jornada_id) {
+      await maybeCloseVotingWhenAllVoted(supabase, match.jornada_id);
+    }
     return NextResponse.json({ ok: true });
   }
 
@@ -60,6 +92,14 @@ export async function POST(request: Request) {
   const { quiniela_match_id, predicted_1x2, predicted_home, predicted_away } = body;
   if (typeof quiniela_match_id !== "string") {
     return NextResponse.json({ error: "quiniela_match_id required" }, { status: 400 });
+  }
+
+  const votingOpen = await isVotingOpenForMatch(quiniela_match_id);
+  if (!votingOpen) {
+    return NextResponse.json(
+      { error: "La votación está cerrada. El admin debe abrirla para poder votar." },
+      { status: 403 }
+    );
   }
 
   const { data: existing } = await supabase
@@ -82,5 +122,15 @@ export async function POST(request: Request) {
     .upsert(payload, { onConflict: "user_id,quiniela_match_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const { data: match } = await supabase
+    .from("quiniela_matches")
+    .select("jornada_id")
+    .eq("id", quiniela_match_id)
+    .single();
+  if (match?.jornada_id) {
+    await maybeCloseVotingWhenAllVoted(supabase, match.jornada_id);
+  }
+
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { closeVotingForOtherJornadas } from "@/lib/quiniela-voting";
 
 const PLACEHOLDER_TEAM = "—";
 
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
         number,
         season,
         slip_image_url: slip_image_url ?? null,
+        voting_open: true,
       })
       .select("id")
       .single();
@@ -124,6 +126,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: msg }, { status: 500 });
       }
     }
+
+    await closeVotingForOtherJornadas(supabase, season, jornada.id);
 
     return NextResponse.json({ ok: true, id: jornada.id });
   } catch (err) {

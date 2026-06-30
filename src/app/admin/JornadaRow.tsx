@@ -17,16 +17,19 @@ type ResultState = {
 type Props = {
   jornada: Jornada;
   matches: QMatch[];
+  isLatestJornada?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
 };
 
-export default function JornadaRow({ jornada, matches, expanded: expandedProp, onToggle }: Props) {
+export default function JornadaRow({ jornada, matches, isLatestJornada = false, expanded: expandedProp, onToggle }: Props) {
   const [expandedInternal, setExpandedInternal] = useState(false);
   const expanded = expandedProp !== undefined ? expandedProp : expandedInternal;
   const handleToggle = onToggle || (() => setExpandedInternal(!expandedInternal));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [votingOpen, setVotingOpen] = useState(jornada.voting_open !== false);
+  const [togglingVoting, setTogglingVoting] = useState(false);
 
   const [resultState, setResultState] = useState<Record<string, ResultState>>(() => {
     const init: Record<string, ResultState> = {};
@@ -90,6 +93,23 @@ export default function JornadaRow({ jornada, matches, expanded: expandedProp, o
     window.location.reload();
   }
 
+  async function toggleVoting() {
+    const next = !votingOpen;
+    setTogglingVoting(true);
+    const res = await fetch(`/api/quiniela/jornadas/${jornada.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voting_open: next }),
+    });
+    setTogglingVoting(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Error al cambiar el estado de la votación.");
+      return;
+    }
+    setVotingOpen(next);
+  }
+
   async function deleteJornada() {
     if (!confirm(`¿Eliminar la jornada ${jornada.number}? Se borrarán todos los partidos y votos de esta jornada.`)) return;
     setDeleting(true);
@@ -104,6 +124,7 @@ export default function JornadaRow({ jornada, matches, expanded: expandedProp, o
   }
 
   const isHistorical = jornada.is_historical ?? false;
+  const showVotingControls = isLatestJornada && !isHistorical;
 
   return (
     <div className={`rounded-lg overflow-hidden ${
@@ -111,36 +132,60 @@ export default function JornadaRow({ jornada, matches, expanded: expandedProp, o
         ? "border-2 border-amber-300 bg-amber-50/30" 
         : "border border-slate-200 bg-white"
     }`}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        className={`flex w-full items-center justify-between px-4 py-3 text-left ${
-          isHistorical ? "hover:bg-amber-50/50" : "hover:bg-slate-50"
-        }`}
-      >
-        <span className="font-medium text-slate-800">
-          Jornada {jornada.number}
-          {isHistorical && (
-            <span className="ml-2 rounded bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-900">
-              Histórica
-            </span>
-          )}
-          {jornada.slip_image_url && (
-            <span className="ml-2 text-xs text-slate-500">(con foto)</span>
-          )}
-        </span>
-        <svg
-          className={`h-4 w-4 text-slate-500 transition-transform ${
-            expanded ? "rotate-90" : ""
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={handleToggle}
+          className={`flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left ${
+            isHistorical ? "hover:bg-amber-50/50" : "hover:bg-slate-50"
           }`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth="2"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-800">Jornada {jornada.number}</span>
+            {isHistorical && (
+              <span className="rounded bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-900">
+                Histórica
+              </span>
+            )}
+            {!isHistorical && isLatestJornada && (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  votingOpen
+                    ? "bg-green-100 text-green-800"
+                    : "bg-slate-200 text-slate-700"
+                }`}
+              >
+                {votingOpen ? "Votación abierta" : "Votación cerrada"}
+              </span>
+            )}
+            {jornada.slip_image_url && (
+              <span className="text-xs text-slate-500">(con foto)</span>
+            )}
+          </div>
+          <span
+            className={`shrink-0 text-slate-400 transition-transform ${
+              expanded ? "rotate-90" : ""
+            }`}
+            aria-hidden
+          >
+            ▸
+          </span>
+        </button>
+        {showVotingControls && (
+          <button
+            type="button"
+            disabled={togglingVoting}
+            onClick={toggleVoting}
+            className={`shrink-0 border-l border-slate-200 px-3 py-3 text-xs font-medium disabled:opacity-50 max-md:px-2 sm:text-sm ${
+              votingOpen
+                ? "bg-amber-50 text-amber-900 hover:bg-amber-100"
+                : "bg-green-50 text-green-800 hover:bg-green-100"
+            }`}
+          >
+            {togglingVoting ? "Guardando…" : votingOpen ? "Cerrar votación" : "Abrir votación"}
+          </button>
+        )}
+      </div>
       {expanded && (
         <div className={`border-t p-4 ${
           isHistorical 

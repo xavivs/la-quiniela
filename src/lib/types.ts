@@ -14,6 +14,7 @@ export type Jornada = {
   season: string;
   slip_image_url: string | null;
   is_historical?: boolean;
+  voting_open?: boolean;
   created_at?: string;
 };
 

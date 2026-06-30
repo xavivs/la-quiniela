@@ -119,11 +119,27 @@ export default function SemanaClient({
     return m.match_order === 15 && m.result_home != null && m.result_away != null;
   }
 
-  // Aún no has votado: solo formulario para votar (sin ver lo que votan los demás)
-  if (!hasVoted) {
+  const votingOpen = jornada.voting_open !== false;
+  const showResultsTable = hasVoted || !votingOpen;
+
+  const votingBadge = (
+    <span
+      className={`ml-2 rounded px-2 py-0.5 text-xs font-medium ${
+        votingOpen ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-700"
+      }`}
+    >
+      {votingOpen ? "Votación abierta" : "Votación cerrada"}
+    </span>
+  );
+
+  // Votación abierta y aún no has votado: formulario (sin ver lo que votan los demás)
+  if (!showResultsTable) {
     return (
       <section>
-        <h2 className="mb-2 text-lg font-semibold text-slate-800">Jornada {jornada.number}</h2>
+        <h2 className="mb-2 text-lg font-semibold text-slate-800">
+          Jornada {jornada.number}
+          {votingBadge}
+        </h2>
         <p className="mb-4 text-slate-600">
           Pronóstico: 1 = local, X = empate, 2 = visitante. Pleno 15: 0/1/2/M. Rellena los 15 partidos y pulsa &quot;Subir votos&quot;.
         </p>
@@ -264,10 +280,13 @@ export default function SemanaClient({
     );
   }
 
-  // Ya has votado: tabla como en la captura (Puntos, Nombre, partidos; "-" si no ha votado)
+  // Ya has votado o votación cerrada: tabla de resultados
   return (
     <section className="mb-8">
-      <h2 className="mb-1 text-lg font-semibold text-slate-800">Resultados Semana</h2>
+      <h2 className="mb-1 text-lg font-semibold text-slate-800">
+        Resultados Semana
+        {votingBadge}
+      </h2>
       <p className="mb-3 text-sm text-slate-600">
         Puntos: partidos 1-14 + pleno 15 (solo suma si has acertado los 14 anteriores). Cada columna es lo que ha votado esa persona. &quot;-&quot; = aún no ha votado.
       </p>
