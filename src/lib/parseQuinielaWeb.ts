@@ -172,12 +172,12 @@ export function parsePleno15Ocr(text: string): ParsedMatch | null {
     return { home_team: teams[0], away_team: teams[teams.length - 1] };
   }
 
-  let teamTokens = oneLine.match(/\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.]{1,}(?:\s+[A-ZÁÉÍÓÚÑ.][A-ZÁÉÍÓÚÑa-záéíóúñ.]+)*)\b/g);
+  const teamTokens = oneLine.match(/\b([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.]{1,}(?:\s+[A-ZÁÉÍÓÚÑ.][A-ZÁÉÍÓÚÑa-záéíóúñ.]+)*)\b/g);
   if (teamTokens) {
-    teamTokens = mergeAbbrevTokens(teamTokens);
-    if (teamTokens.length >= 2) {
-      const home = extractPlenoTeamLine(teamTokens[0]);
-      const away = extractPlenoTeamLine(teamTokens[teamTokens.length - 1]);
+    const mergedTokens = mergeAbbrevTokens(teamTokens);
+    if (mergedTokens.length >= 2) {
+      const home = extractPlenoTeamLine(mergedTokens[0]);
+      const away = extractPlenoTeamLine(mergedTokens[mergedTokens.length - 1]);
       if (home.length >= 2 && away.length >= 2) return { home_team: home, away_team: away };
     }
   }
