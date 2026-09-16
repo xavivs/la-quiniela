@@ -81,6 +81,8 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   ANDORRAEC: "ANDORRA FC",
   "ANDORRA EC": "ANDORRA FC",
   ElIBAR: "EIBAR",
+  LOGRONO: "LOGROÑO",
+  LOGRÓNO: "LOGROÑO",
   IHK: "IFK",
   ALK: "AIK",
   "R.IOVIEDO": "R.OVIEDO",
@@ -90,16 +92,38 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   BARCELONA: "BARCELONA",
 };
 
+/**
+ * La Quiniela marca equipos femeninos como (F).
+ * Tesseract suele leer esa F suelta entre paréntesis como E, 6 o P.
+ */
+const WOMENS_MARKER_RE = /\s*[\(\[]\s*[FE6Pefp]\s*[\)\]]\s*$/;
+
+function extractWomensMarker(name: string): { base: string; isWomen: boolean } {
+  const t = name.trim();
+  const m = t.match(WOMENS_MARKER_RE);
+  if (!m || m.index === undefined) return { base: t, isWomen: false };
+  const base = t.slice(0, m.index).trim();
+  if (base.length < 2) return { base: t, isWomen: false };
+  return { base, isWomen: true };
+}
+
+function withWomensMarker(name: string, isWomen: boolean): string {
+  const base = extractWomensMarker(name).base;
+  return isWomen ? `${base} (F)` : base;
+}
+
 function applyOcrTeamFixes(name: string): string {
-  let upper = name.toUpperCase().replace(/\s+/g, " ").trim();
+  const { base, isWomen } = extractWomensMarker(name);
+  let upper = base.toUpperCase().replace(/\s+/g, " ").trim();
   // OCR: "1" leído por "I" al inicio (1F.GNISTAN → IF GNISTAN, 1FK → IFK)
   upper = upper.replace(/^1F\./g, "IF ");
   upper = upper.replace(/^1F\s+/g, "IF ");
   upper = upper.replace(/^1FK/g, "IFK");
-  if (OCR_TEAM_FIXES[upper]) return OCR_TEAM_FIXES[upper];
+  if (OCR_TEAM_FIXES[upper]) return withWomensMarker(OCR_TEAM_FIXES[upper], isWomen);
   // Normalizar espacios en nombres compuestos mal cortados
   const compact = upper.replace(/\s+/g, "");
-  return OCR_TEAM_FIXES[compact] ?? name;
+  const fixed = OCR_TEAM_FIXES[compact] ?? base;
+  return withWomensMarker(fixed, isWomen);
 }
 
 /** Equipos con abreviatura tipo R.OVIEDO, ATH.CLUB, AT.MADRID… */
@@ -239,6 +263,10 @@ export function parseMatchRowOcr(text: string): ParsedMatch | null {
   home = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(home)));
   away = cleanOcrTeamName(applyOcrTeamFixes(trimToTeamName(away)));
   if (home.length < 2 || away.length < 2 || isHeaderNoise(home) || isHeaderNoise(away)) return null;
+  if (extractWomensMarker(home).isWomen || extractWomensMarker(away).isWomen) {
+    home = withWomensMarker(home, true);
+    away = withWomensMarker(away, true);
+  }
   return { home_team: home, away_team: away };
 }
 
@@ -326,7 +354,8 @@ function cleanOcrTeamName(s: string): string {
  * Simplified for line-based parsing where we already cut at "..." markers.
  */
 function trimToTeamName(s: string): string {
-  let t = s.trim();
+  const { base, isWomen } = extractWomensMarker(s);
+  let t = base.trim();
   const preserve = isLikelyTeamAbbrev(t);
   // Normalize whitespace
   t = t.replace(/\s+/g, " ");
@@ -371,7 +400,7 @@ function trimToTeamName(s: string): string {
     return "";
   }
   
-  return ocrCleanWord(t).trim();
+  return withWomensMarker(ocrCleanWord(t).trim(), isWomen);
 }
 
 /**
@@ -899,8 +928,15 @@ function applyCleanOcrToMatches(matches: ParsedMatch[]): ParsedMatch[] {
   return matches.map(({ home_team, away_team }) => {
     let home = cleanOcrTeamName(applyOcrTeamFixes(home_team));
     let away = cleanOcrTeamName(applyOcrTeamFixes(away_team));
-    const h = home.toUpperCase();
-    const a = away.toUpperCase();
+    const homeWomen = extractWomensMarker(home).isWomen;
+    const awayWomen = extractWomensMarker(away).isWomen;
+    // En la Quiniela, si un lado es femenino el otro también lo es.
+    if (homeWomen || awayWomen) {
+      home = withWomensMarker(home, true);
+      away = withWomensMarker(away, true);
+    }
+    const h = extractWomensMarker(home).base.toUpperCase();
+    const a = extractWomensMarker(away).base.toUpperCase();
     if ((h === "MK" || h === "SIK" || h === "SK") && (a === "TIPS" || a === "TPS" || a === "TIP")) {
       home = "SJK";
       away = "TPS";
