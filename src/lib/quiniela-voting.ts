@@ -25,7 +25,7 @@ export function userHasCompleteVote(
   });
 }
 
-/** Cierra la votación si los 8 jugadores de la quiniela han votado los 15 partidos. */
+/** Cierra la votación si todos los jugadores activos han votado los 15 partidos. */
 export async function maybeCloseVotingWhenAllVoted(
   supabase: SupabaseClient,
   jornadaId: string

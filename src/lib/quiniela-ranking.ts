@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
+import { getQuinielaNamesForSeason } from "@/lib/quiniela-constants";
 import { pointsForPrediction } from "@/lib/quiniela-scoring";
 import type { RankingEntry, QuinielaMatch, QuinielaPrediction } from "@/lib/types";
 
@@ -29,7 +29,8 @@ export async function getSeasonRanking(): Promise<RankingEntry[]> {
     }
   }
 
-  const entries: RankingEntry[] = QUINIELA_NAMES.map((name) => {
+  const names = getQuinielaNamesForSeason(seasonName);
+  const entries: RankingEntry[] = names.map((name) => {
     const u = (users ?? []).find((x) => x.quiniela_name === name);
     return {
       user_id: u?.id ?? "",
@@ -169,8 +170,9 @@ export async function getPointsHistoryBySeason(seasonName: string): Promise<Poin
     historyByJornada[ph.jornada_id][ph.user_id] = ph.points;
   }
 
-  const namesSet = new Set<string>(QUINIELA_NAMES as unknown as string[]);
-  const expectedPlayersCount = QUINIELA_NAMES.length;
+  const names = getQuinielaNamesForSeason(seasonName);
+  const namesSet = new Set<string>(names);
+  const expectedPlayersCount = names.length;
   const hasCompleteHistoryByJornada: Record<string, boolean> = {};
   for (const jornadaId of jornadaIds) {
     const historyCount = Object.keys(historyByJornada[jornadaId] ?? {}).length;
@@ -180,12 +182,12 @@ export async function getPointsHistoryBySeason(seasonName: string): Promise<Poin
       jornadaIsHistoricalById[jornadaId] && historyCount === expectedPlayersCount;
   }
 
-  // Inicializar siempre las 8 columnas; aplicar historial Excel solo donde exista fila (el resto se calcula por predicciones)
+  // Inicializar columnas del roster de esa temporada; aplicar historial Excel solo donde exista fila
   const pointsByJornadaAndUser: Record<string, Record<string, number>> = {};
   for (const jornadaId of Array.from(jornadasWithResults)) {
     const row: Record<string, number> = {};
-    for (const name of QUINIELA_NAMES) row[name] = 0;
-    // Solo aplicar histórico cuando esté completo (8/8).
+    for (const name of names) row[name] = 0;
+    // Solo aplicar histórico cuando esté completo para el roster de esa temporada.
     // Si está parcial, se ignora para evitar mezclas inconsistentes como en J32.
     if (hasCompleteHistoryByJornada[jornadaId]) {
       for (const u of users ?? []) {
@@ -288,7 +290,8 @@ export async function getSeasonRankingBySeason(seasonName: string): Promise<Rank
     }
   }
 
-  const entries: RankingEntry[] = QUINIELA_NAMES.map((name) => {
+  const names = getQuinielaNamesForSeason(seasonName);
+  const entries: RankingEntry[] = names.map((name) => {
     const u = (users ?? []).find((x) => x.quiniela_name === name);
     return {
       user_id: u?.id ?? "",

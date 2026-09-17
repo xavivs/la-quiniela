@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Solo los 8 usuarios de la quiniela pueden votar (deben existir en public.users con quiniela_name válido)
+  // Solo los jugadores activos de la quiniela pueden votar
   const { data: dbUser } = await supabase
     .from("users")
     .select("id, quiniela_name")
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Solo los usuarios de la quiniela (Xavi, Laura, Montse, Lluís, Jordi, Neus, Denci, Marià) pueden votar. Si eres uno de ellos, pide al admin que te asigne tu nombre en la base de datos.",
+          `Solo los usuarios de la quiniela (${QUINIELA_NAMES.join(", ")}) pueden votar. Si eres uno de ellos, pide al admin que te asigne tu nombre en la base de datos.`,
       },
       { status: 403 }
     );

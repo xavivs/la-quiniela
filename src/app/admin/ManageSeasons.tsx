@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import type { Season } from "@/lib/types";
 import CreateSeasonForm from "./CreateSeasonForm";
-import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
+import { getQuinielaNamesForSeason } from "@/lib/quiniela-constants";
 
 export default function ManageSeasons() {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -481,6 +481,7 @@ function SeasonRankingList({ seasonName }: { seasonName: string }) {
 function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const playerNames = getQuinielaNamesForSeason(seasonName);
 
   useEffect(() => {
     async function load() {
@@ -509,7 +510,7 @@ function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
           <thead className="bg-slate-50">
             <tr>
               <th className="px-3 py-2 text-left font-medium text-slate-700">Jornada</th>
-              {QUINIELA_NAMES.map((name) => (
+              {playerNames.map((name) => (
                 <th key={name} className="px-3 py-2 text-center font-medium text-slate-700">
                   {name}
                 </th>
@@ -520,7 +521,7 @@ function SeasonPointsHistoryList({ seasonName }: { seasonName: string }) {
             {history.map((h) => (
               <tr key={h.jornada_id} className="hover:bg-slate-50">
                 <td className="px-3 py-2 font-medium text-slate-800">Jornada {h.jornada_number}</td>
-                {QUINIELA_NAMES.map((name) => (
+                {playerNames.map((name) => (
                   <td key={name} className="px-3 py-2 text-center text-slate-700">
                     {h.points_by_user[name] ?? "-"}
                   </td>

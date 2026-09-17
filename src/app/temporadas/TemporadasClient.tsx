@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { QUINIELA_NAMES } from "@/lib/quiniela-constants";
+import { getQuinielaNamesForSeason } from "@/lib/quiniela-constants";
 import type { Season } from "@/lib/types";
 import type { SeasonFinances, SeasonSummary } from "@/lib/quiniela-season-summary";
 
@@ -101,6 +101,7 @@ export default function TemporadasClient({ seasons, initialSeasonName, isAdmin }
     () => [...(summary?.history ?? [])].sort((a, b) => b.jornada_number - a.jornada_number),
     [summary?.history]
   );
+  const playerNames = getQuinielaNamesForSeason(selectedName);
 
   const selectedSeason = seasons.find((s) => s.name === selectedName);
 
@@ -199,7 +200,7 @@ export default function TemporadasClient({ seasons, initialSeasonName, isAdmin }
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="px-3 py-2 text-left font-medium text-slate-700">Jornada</th>
-                        {QUINIELA_NAMES.map((name) => (
+                        {playerNames.map((name) => (
                           <th key={name} className="px-3 py-2 text-center font-medium text-slate-700">
                             {name}
                           </th>
@@ -214,7 +215,7 @@ export default function TemporadasClient({ seasons, initialSeasonName, isAdmin }
                             <td className="px-3 py-2 font-medium text-slate-800">
                               Jornada {h.jornada_number}
                             </td>
-                            {QUINIELA_NAMES.map((name) => {
+                            {playerNames.map((name) => {
                               const pts = h.points_by_user[name];
                               const cobro = jornadaPrizes[name];
                               const hasCobro = cobro != null && cobro > 0;
