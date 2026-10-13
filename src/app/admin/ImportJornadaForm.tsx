@@ -103,14 +103,14 @@ export default function ImportJornadaForm() {
       if (!worker) {
         throw new Error("No se pudo crear el worker de Tesseract");
       }
-      await worker.setParameters({ tessedit_pageseg_mode: 7 });
+      await worker.setParameters({ tessedit_pageseg_mode: 7, user_defined_dpi: "300" });
       const rowTexts: string[] = [];
       for (let i = 0; i < rows.length; i++) {
         setOcrMessage(`Leyendo partido ${i + 1}/15…`);
         const blob = await canvasToBlob(rows[i].canvas);
-        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 6 });
+        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 6, user_defined_dpi: "300" });
         const { data } = await worker.recognize(blob);
-        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 7 });
+        if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: 7, user_defined_dpi: "300" });
         rowTexts.push((data?.text ?? "").trim());
       }
       await worker.terminate();
@@ -135,7 +135,7 @@ export default function ImportJornadaForm() {
         // Fallback: OCR de página completa si el recorte por filas falla
         setOcrMessage("Reintentando OCR de página completa…");
         const fallbackWorker = await Tesseract.createWorker("spa", 1);
-        await fallbackWorker.setParameters({ tessedit_pageseg_mode: 6 });
+        await fallbackWorker.setParameters({ tessedit_pageseg_mode: 6, user_defined_dpi: "300" });
         const { data } = await fallbackWorker.recognize(file);
         await fallbackWorker.terminate();
         const fullRaw = (data?.text ?? "").trim();

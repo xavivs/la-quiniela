@@ -1,139 +1,121 @@
 import { createWorker } from "tesseract.js";
 import sharp from "sharp";
-import { readdirSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { layoutQuinielaFromGray } from "../src/lib/quinielaOcrImage.ts";
 import { parseMatchesFromRowTexts } from "../src/lib/parseQuinielaWeb.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const examplesDir = join(__dirname, "..", "examples");
 
-const TEXT_LEFT = 0.02;
-const TEXT_WIDTH = 0.62;
-const TARGET_WIDTH = 1400;
-const ROW_FIRST_Y = 0.23;
-const ROW_STEP_Y = 0.047;
-const ROW_HEIGHT = 0.028;
+const EXPECTED = {
+  "2026-01-14": [
+    ["BETIS", "VILLARREAL"], ["CELTA", "RAYO"], ["ELCHE", "SEVILLA"], ["GETAFE", "VALENCIA"],
+    ["OSASUNA", "R.OVIEDO"], ["AT.MADRID", "ALAVÉS"], ["MALLORCA", "ATH.CLUB"], ["R.MADRID", "LEVANTE"],
+    ["ALBACETE", "CÁDIZ"], ["BURGOS", "HUESCA"], ["C. LEONESA", "SPORTING"], ["ALMERÍA", "DEPORTIVO"],
+    ["GRANADA", "EIBAR"], ["RACING S.", "LAS PALMAS"], ["R.SOCIEDAD", "BARCELONA"],
+  ],
+  "2026-01-22": [
+    ["RAYO", "OSASUNA"], ["VALENCIA", "ESPANYOL"], ["SEVILLA", "ATH.CLUB"], ["VILLARREAL", "R.MADRID"],
+    ["AT.MADRID", "MALLORCA"], ["BARCELONA", "R.OVIEDO"], ["R.SOCIEDAD", "CELTA"], ["ALAVÉS", "BETIS"],
+    ["VALLADOLID", "ALBACETE"], ["LAS PALMAS", "CÓRDOBA"], ["ANDORRA FC", "HUESCA"], ["EIBAR", "ALMERÍA"],
+    ["R.ZARAGOZA", "CASTELLÓN"], ["DEPORTIVO", "RACING S."], ["GIRONA", "GETAFE"],
+  ],
+  "2026-01-29": [
+    ["R.OVIEDO", "GIRONA"], ["OSASUNA", "VILLARREAL"], ["LEVANTE", "AT.MADRID"], ["ELCHE", "BARCELONA"],
+    ["R.MADRID", "RAYO"], ["BETIS", "VALENCIA"], ["GETAFE", "CELTA"], ["MALLORCA", "SEVILLA"],
+    ["C. LEONESA", "DEPORTIVO"], ["ALMERÍA", "CEUTA"], ["EIBAR", "SPORTING"], ["HUESCA", "CÁDIZ"],
+    ["GRANADA", "RACING S."], ["MIRANDÉS", "MÁLAGA"], ["ATH.CLUB", "R.SOCIEDAD"],
+  ],
+  "2026-02-04": [
+    ["RAYO", "R.OVIEDO"], ["BARCELONA", "MALLORCA"], ["SEVILLA", "GIRONA"], ["R.SOCIEDAD", "ELCHE"],
+    ["ALAVÉS", "GETAFE"], ["ATH.CLUB", "LEVANTE"], ["AT.MADRID", "BETIS"], ["VILLARREAL", "ESPANYOL"],
+    ["CÁDIZ", "ALMERÍA"], ["VALLADOLID", "CASTELLÓN"], ["CEUTA", "CÓRDOBA"], ["DEPORTIVO", "ALBACETE"],
+    ["SPORTING", "HUESCA"], ["MÁLAGA", "C. LEONESA"], ["VALENCIA", "R.MADRID"],
+  ],
+  "2026-03-18": [
+    ["ELCHE", "MALLORCA"], ["ESPANYOL", "GETAFE"], ["LEVANTE", "R.OVIEDO"], ["OSASUNA", "GIRONA"],
+    ["SEVILLA", "VALENCIA"], ["BARCELONA", "RAYO"], ["CELTA", "ALAVÉS"], ["ATH.CLUB", "BETIS"],
+    ["LEGANÉS", "CEUTA"], ["ANDORRA FC", "EIBAR"], ["CÁDIZ", "MÁLAGA"], ["BURGOS", "CÓRDOBA"],
+    ["MIRANDÉS", "VALLADOLID"], ["LAS PALMAS", "SPORTING"], ["R.MADRID", "AT.MADRID"],
+  ],
+  "2026-06-29": [
+    ["PORTUGAL", "CROACIA"], ["SUIZA", "ARGELIA"], ["AUSTRALIA", "EGIPTO"], ["ARGENTINA", "CABO VERDE"],
+    ["COLOMBIA", "GHANA"], ["FC LAHTI", "IF GNISTAN"], ["SJK", "TPS"], ["FF JARO", "ILVES"],
+    ["VPS", "IFK MARIEHAMN"], ["SIRIUS", "MJALLBY"], ["HALMSTADS", "VASTERAS"], ["DEGERFORS", "MALMO"],
+    ["GOTEBORG", "AIK"], ["KALMAR", "ORGRYTE"], ["ELFSBORG", "HAMMARBY"],
+  ],
+  "2026-10-06": [
+    ["RAYO", "ATH.CLUB"], ["ALAVÉS", "AT.MADRID"], ["BARCELONA", "GETAFE"], ["ELCHE", "CELTA"],
+    ["R.SOCIEDAD", "DEPORTIVO"], ["BETIS", "OSASUNA"], ["RACING S.", "VALENCIA"], ["LEVANTE", "SEVILLA"],
+    ["ELDENSE", "CÓRDOBA"], ["ANDORRA FC", "CASTELLÓN"], ["ALMERÍA", "LEGANÉS"], ["MALLORCA", "LAS PALMAS"],
+    ["BURGOS", "GRANADA"], ["R.OVIEDO", "EIBAR"], ["R.MADRID", "VILLARREAL"],
+  ],
+};
 
-async function preprocess(buffer) {
-  return sharp(buffer)
+async function ocrFile(worker, imagePath) {
+  const { data, info } = await sharp(readFileSync(imagePath))
     .grayscale()
     .normalize()
     .linear(1.4, -(128 * 0.4))
-    .resize({ width: TARGET_WIDTH, withoutEnlargement: false })
+    .resize({ width: 1400 })
     .raw()
     .toBuffer({ resolveWithObject: true });
-}
-
-function detectTextBands(data, w, h) {
-  const scanW = Math.round(w * TEXT_WIDTH);
-  const startY = Math.round(h * 0.11);
-  const left = Math.round(w * TEXT_LEFT);
-  const minInk = scanW * 0.012;
-  const raw = [];
-  let inBand = false;
-  let bandStart = 0;
-
-  for (let y = startY; y < h; y++) {
-    let ink = 0;
-    for (let x = left; x < left + scanW; x++) {
-      if (data[y * w + x] < 145) ink++;
-    }
-    if (ink > minInk) {
-      if (!inBand) {
-        bandStart = y;
-        inBand = true;
-      }
-    } else if (inBand) {
-      raw.push({ top: bandStart, bottom: y, height: y - bandStart });
-      inBand = false;
-    }
-  }
-  if (inBand) raw.push({ top: bandStart, bottom: h, height: h - bandStart });
-
-  const merged = [];
-  for (const b of raw) {
-    const last = merged[merged.length - 1];
-    if (last && b.top - last.bottom < 10) {
-      last.bottom = b.bottom;
-      last.height = last.bottom - last.top;
-    } else merged.push({ ...b });
-  }
-
-  const candidates = merged.filter((b) => b.height >= 12 && b.height < h * 0.07 && b.top > h * 0.11);
-  if (candidates.length < 10) return [];
-
-  const heights = candidates.map((b) => b.height).sort((a, b) => a - b);
-  const medianH = heights[Math.floor(heights.length / 2)] ?? 35;
-  return candidates.filter((b) => b.height >= medianH * 0.45 && b.height <= medianH * 2.2);
-}
-
-function bandsToRowSpecs(bands, h) {
-  if (bands.length < 12) {
-    const rows = [];
-    for (let i = 0; i < 14; i++) {
-      rows.push({ top: Math.round(h * (ROW_FIRST_Y + i * ROW_STEP_Y)), height: Math.round(h * ROW_HEIGHT) });
-    }
-    rows.push({ top: Math.round(h * 0.875), height: Math.round(h * 0.115) });
-    return rows;
-  }
-
-  let sorted = [...bands].sort((a, b) => a.top - b.top);
-  while (sorted.length > 14 && sorted[0].top < h * 0.17) sorted = sorted.slice(1);
-
-  const rows = sorted.slice(0, 14).map((b) => ({ top: Math.max(0, b.top - 2), height: b.height + 4 }));
-  rows.push({ top: Math.round(h * 0.87), height: Math.round(h * 0.11) });
-  return rows.slice(0, 15);
-}
-
-async function ocrRows(imagePath) {
-  const { data, info } = await preprocess(await sharp(imagePath).toBuffer());
-  const w = info.width;
-  const h = info.height;
-  const bands = detectTextBands(data, w, h);
-  const specs = bandsToRowSpecs(bands, h);
-
-  const processedPng = await sharp(data, { raw: { width: w, height: h, channels: 1 } }).png().toBuffer();
-  const worker = await createWorker("spa");
-  await worker.setParameters({ tessedit_pageseg_mode: "7" });
-
+  const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
+  const layout = layoutQuinielaFromGray(data, info.width, info.height);
   const rowTexts = [];
-  const left = Math.round(w * TEXT_LEFT);
-  const width = Math.round(w * TEXT_WIDTH);
-
-  for (let i = 0; i < specs.length; i++) {
-    const spec = specs[i];
-    if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: "6" });
-    const crop = await sharp(processedPng)
-      .extract({ left, top: spec.top, width, height: spec.height })
+  for (let i = 0; i < layout.rows.length; i++) {
+    const spec = layout.rows[i];
+    const width = Math.max(1, spec.textRight - layout.textLeft);
+    if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: "6", user_defined_dpi: "300" });
+    const crop = await sharp(png)
+      .extract({ left: layout.textLeft, top: spec.top, width, height: spec.height })
+      .resize({ width: width * 2, height: spec.height * 2, kernel: "nearest" })
+      .extend({ top: 16, bottom: 16, left: 16, right: 16, background: { r: 255, g: 255, b: 255 } })
       .png()
       .toBuffer();
     const { data: ocr } = await worker.recognize(crop);
-    if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: "7" });
+    if (i === 14) await worker.setParameters({ tessedit_pageseg_mode: "7", user_defined_dpi: "300" });
     rowTexts.push((ocr?.text ?? "").trim().replace(/\s+/g, " "));
   }
-  await worker.terminate();
-  return { rowTexts, h, w, bands: bands.length };
+  return { rowTexts, parsed: parseMatchesFromRowTexts(rowTexts) };
 }
 
 async function main() {
-  const files = readdirSync(examplesDir).filter((f) => /\.(jpe?g|png|webp)$/i.test(f));
-  for (const file of files.sort()) {
-    const path = join(examplesDir, file);
+  const worker = await createWorker("spa");
+  await worker.setParameters({ tessedit_pageseg_mode: "7", user_defined_dpi: "300" });
+  const files = readdirSync(examplesDir).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).sort();
+  let bad = 0;
+  let total = 0;
+  for (const file of files) {
+    const key = Object.keys(EXPECTED).find((k) => file.includes(k));
     console.log("\n" + "=".repeat(70));
-    console.log("FILE:", file);
-    const { rowTexts, h, w, bands } = await ocrRows(path);
-    console.log(`Image: ${w}x${h}, bands detected: ${bands}`);
-    rowTexts.forEach((t, i) => console.log(`  raw ${String(i + 1).padStart(2)}: ${JSON.stringify(t)}`));
-    const parsed = parseMatchesFromRowTexts(rowTexts);
-    console.log("--- parsed ---");
+    console.log(file);
+    const { rowTexts, parsed } = await ocrFile(worker, join(examplesDir, file));
+    if (!key) {
+      parsed.forEach((m, i) => console.log(`  ${i + 1}: ${m.home_team} - ${m.away_team} | ${rowTexts[i]}`));
+      continue;
+    }
     parsed.forEach((m, i) => {
-      const ok = m.home_team || m.away_team;
-      console.log(`  ${String(i + 1).padStart(2)}: ${ok ? `${m.home_team} - ${m.away_team}` : "(vacío)"}`);
+      total++;
+      const [home, away] = EXPECTED[key][i];
+      const ok = m.home_team === home && m.away_team === away;
+      if (!ok) {
+        bad++;
+        console.log(`  MIS ${i + 1}: ${JSON.stringify(m.home_team + " - " + m.away_team)} != ${home} - ${away}`);
+        console.log(`       raw: ${JSON.stringify(rowTexts[i])}`);
+      }
     });
-    const empty = parsed.filter((m) => !m.home_team && !m.away_team).length;
-    console.log(`=> ${15 - empty}/15 leídos, ${empty} vacíos`);
+    const n = parsed.filter((m, i) => m.home_team === EXPECTED[key][i][0] && m.away_team === EXPECTED[key][i][1]).length;
+    console.log(`=> ${n}/15`);
   }
+  await worker.terminate();
+  console.log(`\n${total - bad}/${total} correctos`);
+  if (bad > 0) process.exitCode = 1;
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

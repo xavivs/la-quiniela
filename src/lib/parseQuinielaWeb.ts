@@ -81,6 +81,8 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   ANDORRAEC: "ANDORRA FC",
   "ANDORRA EC": "ANDORRA FC",
   ElIBAR: "EIBAR",
+  ELIBAR: "EIBAR",
+  ELBAR: "EIBAR",
   LOGRONO: "LOGROÑO",
   LOGRÓNO: "LOGROÑO",
   IHK: "IFK",
@@ -90,6 +92,26 @@ const OCR_TEAM_FIXES: Record<string, string> = {
   ELFSBORG: "ELFSBORG",
   HAMMARBY: "HAMMARBY",
   BARCELONA: "BARCELONA",
+  "FG LAHTI": "FC LAHTI",
+  FGLAHTI: "FC LAHTI",
+  "RACING S": "RACING S.",
+  RACINGS: "RACING S.",
+  RACINGSS: "RACING S.",
+  RACINGES: "RACING S.",
+  "RACING SS": "RACING S.",
+};
+
+/** Tesseract suele perder la tilde en estos nombres del boleto. */
+const ACCENT_TEAMS: Record<string, string> = {
+  ALAVES: "ALAVÉS",
+  CADIZ: "CÁDIZ",
+  ALMERIA: "ALMERÍA",
+  CORDOBA: "CÓRDOBA",
+  CASTELLON: "CASTELLÓN",
+  MIRANDES: "MIRANDÉS",
+  MALAGA: "MÁLAGA",
+  LEGANES: "LEGANÉS",
+  LOGRONO: "LOGROÑO",
 };
 
 /**
@@ -119,16 +141,16 @@ function applyOcrTeamFixes(name: string): string {
   upper = upper.replace(/^1F\./g, "IF ");
   upper = upper.replace(/^1F\s+/g, "IF ");
   upper = upper.replace(/^1FK/g, "IFK");
-  if (OCR_TEAM_FIXES[upper]) return withWomensMarker(OCR_TEAM_FIXES[upper], isWomen);
-  // Normalizar espacios en nombres compuestos mal cortados
   const compact = upper.replace(/\s+/g, "");
-  const fixed = OCR_TEAM_FIXES[compact] ?? base;
+  let fixed = OCR_TEAM_FIXES[upper] ?? OCR_TEAM_FIXES[compact] ?? base;
+  const accent = ACCENT_TEAMS[fixed.toUpperCase()] ?? ACCENT_TEAMS[upper];
+  if (accent) fixed = accent;
   return withWomensMarker(fixed, isWomen);
 }
 
 /** Equipos con abreviatura tipo R.OVIEDO, ATH.CLUB, AT.MADRID… */
 const DOT_ABBREV_TEAMS = new Set([
-  "R.OVIEDO", "R.MADRID", "AT.MADRID", "ATH.CLUB", "R.SOCIEDAD", "RACINGS", "C. LEONESA",
+  "R.OVIEDO", "R.MADRID", "AT.MADRID", "ATH.CLUB", "R.SOCIEDAD", "RACING S.", "RACINGS", "C. LEONESA",
 ]);
 
 function isLikelyTeamAbbrev(s: string): boolean {
@@ -173,10 +195,10 @@ function mergeAbbrevTokens(tokens: string[]): string[] {
       i++;
       continue;
     }
-    if (/^(R|AT|ATH)$/i.test(t) && i + 1 < tokens.length) {
-      const next = tokens[i + 1].trim();
+    if (/^(R|AT|ATH)\.?$/i.test(t) && i + 1 < tokens.length) {
+      const next = tokens[i + 1].trim().replace(/\.+$/, "");
       if (/^[A-ZÁÉÍÓÚÑ]/i.test(next)) {
-        out.push(`${t.toUpperCase()}.${next}`);
+        out.push(`${t.replace(/\./g, "").toUpperCase()}.${next}`);
         i++;
         continue;
       }
